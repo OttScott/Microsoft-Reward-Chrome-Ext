@@ -8,6 +8,7 @@ let _pcUaOverrideEnable;
 let _mbUaOverrideEnable;
 let _pcUaOverrideValue;
 let _mbUaOverrideValue;
+let workIntervalId = null;  // Store interval ID for cleanup
 
 // Initialize core objects
 const googleTrend = new GoogleTrend();
@@ -38,12 +39,18 @@ function loadSavedSettings() {
         mbUaOverrideEnable: false,
         pcUaOverrideValue: '',
         mbUaOverrideValue: '',
+        startTime: '09:00',      // Add default schedule settings
+        endTime: '17:00',
+        enableSchedule: false,
+        baseSearchCount: 30,
+        searchVariation: 5
     }, function (options) {
         _compatibilityMode = options.compatibilityMode;
         _pcUaOverrideEnable = options.pcUaOverrideEnable;
         _mbUaOverrideEnable = options.mbUaOverrideEnable;
         _pcUaOverrideValue = options.pcUaOverrideValue;
         _mbUaOverrideValue = options.mbUaOverrideValue;
+        // Schedule settings will be read directly from storage
     });
 }
 
@@ -79,9 +86,13 @@ function initialize() {
     console.log('Microsoft Rewards Bot: Initialization started');
     doBackgroundWork();
 
+    // Clear any existing interval
+    if (workIntervalId) {
+        clearInterval(workIntervalId);
+    }
+
     console.log('Setting up background work interval...');
-    // check every 120 minutes for possible new promotion
-    setInterval(
+    workIntervalId = setInterval(
         function () {
             console.log('Running scheduled background work...');
             doBackgroundWork();
@@ -90,8 +101,47 @@ function initialize() {
     );
 }
 
+async function isWithinSchedule() {
+    const settings = await chrome.storage.sync.get({
+        startTime: '09:00',
+        endTime: '17:00',
+        enableSchedule: false
+    });
+
+    if (!settings.enableSchedule) {
+        return true;
+    }
+
+    const now = new Date();
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+    
+    const [startHour, startMinute] = settings.startTime.split(':').map(Number);
+    const [endHour, endMinute] = settings.endTime.split(':').map(Number);
+    
+    const startMinutes = startHour * 60 + startMinute;
+    const endMinutes = endHour * 60 + endMinute;
+
+    const isWithin = currentTime >= startMinutes && currentTime <= endMinutes;
+    
+    // If we're outside schedule, cleanup timers and show inactive badge
+    if (!isWithin && workIntervalId) {
+        console.log('Outside schedule, cleaning up timers');
+        clearInterval(workIntervalId);
+        workIntervalId = null;
+        setBadge(new ScheduleInactiveBadge());
+    }
+
+    return isWithin;
+}
+
 async function doBackgroundWork() {
     console.log('Background work starting...');
+    
+    if (!await isWithinSchedule()) {
+        console.log('Outside scheduled hours, pausing work');
+        return;
+    }
+    
     if (searchQuest.jobStatus == STATUS_BUSY || userDailyStatus.jobStatus == STATUS_BUSY) {
         console.log('Work already in progress, skipping...');
         return;
@@ -180,6 +230,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             getDebugInfo();
             sendResponse({success: true});
             break;
+        case 'updateSchedule':
+            chrome.storage.sync.set({
+                startTime: message.content.startTime,
+                endTime: message.content.endTime,
+                enableSchedule: message.content.enableSchedule
+            }, () => {
+                console.log('Schedule updated:', message.content);
+                // Re-initialize to apply new schedule
+                initialize();
+                sendResponse({success: true});
+            });
+            break;
+        case 'updateSearchSettings':
+            chrome.storage.sync.set({
+                baseSearchCount: message.content.baseSearchCount,
+                searchVariation: message.content.searchVariation
+            }, () => {
+                console.log('Search settings updated:', message.content);
+                sendResponse({success: true});
+            });
+            break;
     }
     return true; // Required to use sendResponse asynchronously
 });
@@ -193,6 +264,15 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
     console.log('Service worker activating...');
     event.waitUntil(clients.claim());
+});
+
+// Handle extension unload
+chrome.runtime.onSuspend.addListener(() => {
+    console.log('Extension suspending, cleaning up...');
+    if (workIntervalId) {
+        clearInterval(workIntervalId);
+        workIntervalId = null;
+    }
 });
 
 console.log('Background script initialization complete');

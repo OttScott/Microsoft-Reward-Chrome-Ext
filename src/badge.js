@@ -100,6 +100,13 @@ class NoneBadge extends Badge {
     }
 }
 
+class ScheduleInactiveBadge extends Badge {
+    constructor() {
+        // Use new off icon with grey text
+        super('inactive', 'img/off@1.5x.png', 'off', [128, 128, 128, 100]);
+    }
+}
+
 let _currentBadge = null;
 function setBadge(badge) {
     badge.set();
@@ -112,3 +119,4 @@ function isCurrentBadge(badgeType) {
     }
     return _currentBadge.type == badgeType;
 }
+

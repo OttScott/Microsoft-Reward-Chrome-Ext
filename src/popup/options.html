@@ -2,9 +2,41 @@
 <html>
 
 <head>
-    <title>Options</title>
+    <meta charset="UTF-8">
+    <title>Microsoft Rewards Bot Options</title>
     <link rel="stylesheet" href="css.css">
     <link rel="stylesheet" href="css-tooltip.css" />
+    <style>
+        .button-group {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        #status {
+            color: green;
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        .section {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        input[type="number"] {
+            width: 60px;
+            padding: 4px;
+        }
+
+        .option-row {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+    </style>
 </head>
 
 <body>
@@ -52,7 +84,43 @@
                 <div class="option_name">Debug options:</div>
                 <button type="button" class="button" id="copy-debug-info">Copy debug info</button>
             </div>
-
+            <div class="option-group">
+                <h3>Schedule</h3>
+                <div>
+                    <label for="startTime">Start Time:</label>
+                    <input type="time" id="startTime" />
+                </div>
+                <div>
+                    <label for="endTime">End Time:</label>
+                    <input type="time" id="endTime" />
+                </div>
+                <div>
+                    <label>
+                        <input type="checkbox" id="enableSchedule" />
+                        Enable Schedule
+                    </label>
+                </div>
+            </div>
+            <div class="section">
+                <h3>Search Settings</h3>
+                <div class="option-row">
+                    <label for="baseSearchCount">Base number of searches:</label>
+                    <input type="number" id="baseSearchCount" min="1" max="100" />
+                </div>
+                <div class="option-row">
+                    <label for="searchVariation">Random variation (&plusmn;):</label>
+                    <input type="number" id="searchVariation" min="0" max="20" />
+                </div>
+                <div class="info-text">
+                    Each search session will perform (base &plusmn; variation) searches
+                    <br>
+                    Changes take effect after clicking Save
+                </div>
+            </div>
+            <div class="button-group">
+                <button id="save">Save All Settings</button>
+            </div>
+            <div id="status"></div>
         </div> <!-- end of content div -->
 
         <footer>

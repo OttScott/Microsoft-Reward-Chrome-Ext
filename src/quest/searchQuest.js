@@ -3,6 +3,7 @@ class SearchQuest {
         this._googleTrend_ = googleTrend;
         this._searchIntervalMS = this._searchIntervalMS = 900000 + Math.random()*1000*60*5;
         this.reset();
+        this._loadSearchSettings();
     }
 
     reset() {
@@ -138,21 +139,65 @@ class SearchQuest {
         if (this._isCurrentSearchCompleted()) {
             return;
         }
-        let response;
+
+        const searchType = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'PC' : 'Mobile';
+        const searchWord = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ?
+            this._googleTrend_.nextPCWord :
+            this._googleTrend_.nextMBWord;
+
+        console.log(`Performing ${searchType} search ${this._currentSearchCount_ + 1}: "${searchWord}"`);
+
         try {
-            response = await fetch(this._getBingSearchUrl());
+            const response = await fetch(this._getBingSearchUrl());
+            if (response.status != 200) {
+                throw new FetchResponseAnomalyException('Search');
+            }
+            
+            this._currentSearchCount_++;
+            console.log(`${searchType} search completed. Progress: ${this._currentSearchCount_}/${this._getCurrentMaxSearches()}`);
+            
+            await sleep(this._searchIntervalMS);
+            await this._requestBingSearch();
         } catch (ex) {
             throw new FetchFailedException('Search', ex);
         }
+    }
 
-        if (response.status != 200) {
-            throw new FetchResponseAnomalyException('Search');
+    async _loadSearchSettings() {
+        const settings = await chrome.storage.sync.get({
+            baseSearchCount: 30,  // default value
+            searchVariation: 5    // default variation
+        });
+        
+        this._baseSearchCount = settings.baseSearchCount;
+        this._searchVariation = settings.searchVariation;
+    }
+
+    _getCurrentMaxSearches() {
+        if (!this._baseSearchCount) {
+            return this._status_.pcSearchStatus.searchNeededCount;
         }
 
-        this._currentSearchCount_++;
-        await sleep(this._searchIntervalMS);
-
-        await this._requestBingSearch();
+        // Get random number between 0 and 1
+        const randomFactor = Math.random();
+        
+        // Convert 0-1 range to -variation to +variation
+        // 0.0 -> -variation
+        // 0.5 -> 0
+        // 1.0 -> +variation
+        const variation = (randomFactor - 0.5) * 2 * this._searchVariation;
+        
+        // Round to nearest integer
+        const searchCount = Math.round(this._baseSearchCount + variation);
+        
+        console.log(`Search count calculation:
+            Base: ${this._baseSearchCount}
+            Random factor: ${randomFactor.toFixed(3)}
+            Variation: ${variation.toFixed(1)} (±${this._searchVariation})
+            Final count: ${searchCount}`
+        );
+        
+        return searchCount;
     }
 
     _getBingSearchUrl() {

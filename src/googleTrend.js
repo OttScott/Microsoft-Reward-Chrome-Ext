@@ -74,49 +74,17 @@ class GoogleTrend {
     }
 
     async _fetchGoogleTrend(url) {
-        console.log('Fetching Google Trends from:', url);
-        try {
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Accept': '*/*',
-                    'Origin': 'https://trends.google.com',
-                    'Referer': 'https://trends.google.com/',
-                    'sec-fetch-mode': 'cors',
-                    'sec-fetch-site': 'same-origin'
-                },
-                credentials: 'omit'
-            });
-
-            console.log('Response:', {
-                status: response.status,
-                ok: response.ok,
-                type: response.type,
-                headers: Object.fromEntries(response.headers.entries())
-            });
-
-            if (!response.ok) {
-                // If API fails, use fallback search terms
-                console.log('Using fallback search terms');
-                this._useFallbackTerms();
-                return;
-            }
-
-            await this._processResponse(response);
-
-        } catch (error) {
-            console.error('Google Trends fetch error:', error);
-            this._useFallbackTerms();
-        }
+        // Skip fetch attempt since we're using fallback terms
+        this._useFallbackTerms();
     }
 
     _useFallbackTerms() {
-        // Use some generic search terms if API fails
         const fallbackTerms = [
             'news today', 'weather forecast', 'local events',
             'sports scores', 'movie reviews', 'tech news',
             'recipes', 'health tips', 'travel destinations',
-            'book reviews'
+            'book reviews', 'local news', 'music reviews',
+            'science news', 'history facts', 'space exploration'
         ];
         this._googleTrendWords_.words = fallbackTerms;
         this._googleTrendWords_.date = this._getyyyymmdd(new Date());
@@ -157,8 +125,9 @@ class GoogleTrend {
     }
 
     _getGoogleTrendUrl(yyyymmdd) {
-        // New endpoint is at /trending-stories/
-        return `https://trends.google.com/trends/api/trending-stories/US?cat=all&hl=en-US&ed=${yyyymmdd}`;
+        // Just use fallback terms directly since Google Trends API is unreliable
+        this._useFallbackTerms();
+        return null;
     }
 
     _getWordsFromJSON(json) {
