@@ -29,50 +29,115 @@ class GoogleTrend {
         if (this._isGoogleTrendUpToDate()) {
             return;
         }
-        if (this._loadLocalWords()) {
-            return;
-        }
+        
+        try {
+            if (await this._loadLocalWords()) {
+                return;
+            }
 
-        const dates = this._getPastThreeDays();
-        for (let i = 0; i<3; i++) {
-            await this._fetchGoogleTrend(this._getGoogleTrendUrl(dates[i]));
+            const dates = this._getPastThreeDays();
+            for (let i = 0; i < 3; i++) {
+                await this._fetchGoogleTrend(this._getGoogleTrendUrl(dates[i]));
+            }
+            await this._saveWordsToLocal();
+        } catch (error) {
+            console.error('Error getting Google trend words:', error);
+            throw error;
         }
-        this._saveWordsToLocal();
     }
 
     _isGoogleTrendUpToDate(date=this._googleTrendWords_.date) {
         return date == this._getyyyymmdd(new Date());
     }
 
-    _saveWordsToLocal() {
-        localStorage.setItem('googleTrend', this._googleTrendWords_.words.join('|'));
-        localStorage.setItem('googleTrendDate', this._googleTrendWords_.date);
+    async _saveWordsToLocal() {
+        await chrome.storage.local.set({
+            'googleTrend': this._googleTrendWords_.words.join('|'),
+            'googleTrendDate': this._googleTrendWords_.date
+        });
     }
 
-    _loadLocalWords() {
-        const date = localStorage.getItem('googleTrendDate');
-        if (date == undefined) {
+    async _loadLocalWords() {
+        const result = await chrome.storage.local.get(['googleTrend', 'googleTrendDate']);
+        const date = result.googleTrendDate;
+        
+        if (!date) {
             return false;
         }
         if (!this._isGoogleTrendUpToDate(date)) {
             return false;
         }
+
         this._googleTrendWords_.date = date;
-        this._googleTrendWords_.words = localStorage.getItem('googleTrend').split('|');
+        this._googleTrendWords_.words = result.googleTrend.split('|');
         return true;
     }
 
     async _fetchGoogleTrend(url) {
-        let response;
+        console.log('Fetching Google Trends from:', url);
         try {
-            response = await fetch(url);
-        } catch (ex) {
-            throw new FetchFailedException('googleTrend::_fetchGoogleTrend', ex);
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': '*/*',
+                    'Origin': 'https://trends.google.com',
+                    'Referer': 'https://trends.google.com/',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-site': 'same-origin'
+                },
+                credentials: 'omit'
+            });
+
+            console.log('Response:', {
+                status: response.status,
+                ok: response.ok,
+                type: response.type,
+                headers: Object.fromEntries(response.headers.entries())
+            });
+
+            if (!response.ok) {
+                // If API fails, use fallback search terms
+                console.log('Using fallback search terms');
+                this._useFallbackTerms();
+                return;
+            }
+
+            await this._processResponse(response);
+
+        } catch (error) {
+            console.error('Google Trends fetch error:', error);
+            this._useFallbackTerms();
         }
-        if (!response.ok) {
-            throw new FetchFailedException('googleTrend::_fetchGoogleTrend', response);
+    }
+
+    _useFallbackTerms() {
+        // Use some generic search terms if API fails
+        const fallbackTerms = [
+            'news today', 'weather forecast', 'local events',
+            'sports scores', 'movie reviews', 'tech news',
+            'recipes', 'health tips', 'travel destinations',
+            'book reviews'
+        ];
+        this._googleTrendWords_.words = fallbackTerms;
+        this._googleTrendWords_.date = this._getyyyymmdd(new Date());
+    }
+
+    async _processResponse(response) {
+        const text = await response.text();
+        if (!text || text.length < 6) {
+            throw new Error('Empty response');
         }
-        this._getWordsFromJSON(JSON.parse((await response.text()).slice(5)));
+
+        // Remove )]}'` prefix
+        const jsonText = text.replace(/^\)\]\}'/, '');
+        console.log('Response preview:', jsonText.substring(0, 100));
+
+        const json = JSON.parse(jsonText);
+        if (!json?.default?.trendingSearchesDays?.[0]?.trendingSearches) {
+            throw new Error('Invalid JSON structure');
+        }
+        
+        this._getWordsFromJSON(json);
     }
 
     _getPastThreeDays() {
@@ -92,7 +157,8 @@ class GoogleTrend {
     }
 
     _getGoogleTrendUrl(yyyymmdd) {
-        return `https://trends.google.com/trends/api/dailytrends?hl=en-US&ed=${yyyymmdd}&geo=US&ns=15`;
+        // New endpoint is at /trending-stories/
+        return `https://trends.google.com/trends/api/trending-stories/US?cat=all&hl=en-US&ed=${yyyymmdd}`;
     }
 
     _getWordsFromJSON(json) {

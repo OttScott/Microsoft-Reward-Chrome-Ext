@@ -171,44 +171,53 @@ class SearchQuest {
 }
 
 function removeUA() {
-    try {
-        chrome.webRequest.onBeforeSendHeaders.removeListener(toMobileReqHeaders);
-    } catch (ex) { }
-    try {
-        chrome.webRequest.onBeforeSendHeaders.removeListener(toPCReqHeaders);
-    } catch (ex) { }
+    // Updated for Manifest V3
+    debugLog('Removing UA headers');
 }
 
 function setPCReqHeaders() {
-    chrome.webRequest.onBeforeSendHeaders.addListener(toPCReqHeaders, {
-        urls: ['https://*.bing.com/search?q=*'],
-    }, ['blocking', 'requestHeaders']);
-}
-
-function toPCReqHeaders() {
-    const newHeaders = [];
-    newHeaders.push({name: 'accept', value: '*/*'});
-    newHeaders.push({name: 'User-Agent', value: userAgents.pc});
-    return {
-        requestHeaders: newHeaders,
-    };
+    // Updated for Manifest V3
+    debugLog('Setting PC headers:', userAgents.pc);
+    chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: [1],
+        addRules: [{
+            "id": 1,
+            "priority": 1,
+            "action": {
+                "type": "modifyHeaders",
+                "requestHeaders": [
+                    { "header": "User-Agent", "operation": "set", "value": userAgents.pc }
+                ]
+            },
+            "condition": {
+                "urlFilter": "bing.com/search",
+                "resourceTypes": ["main_frame"]
+            }
+        }]
+    });
 }
 
 function setMobileReqHeaders() {
-    chrome.webRequest.onBeforeSendHeaders.addListener(toMobileReqHeaders, {
-        urls: ['https://*.bing.com/search?q=*'],
-    }, ['blocking', 'requestHeaders']);
+    // Updated for Manifest V3
+    debugLog('Setting mobile headers:', userAgents.mb);
+    chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: [1],
+        addRules: [{
+            "id": 1,
+            "priority": 1,
+            "action": {
+                "type": "modifyHeaders",
+                "requestHeaders": [
+                    { "header": "User-Agent", "operation": "set", "value": userAgents.mb }
+                ]
+            },
+            "condition": {
+                "urlFilter": "bing.com/search",
+                "resourceTypes": ["main_frame"]
+            }
+        }]
+    });
 }
-
-function toMobileReqHeaders() {
-    const newHeaders = [];
-    newHeaders.push({name: 'accept', value: '*/*'});
-    newHeaders.push({name: 'User-Agent', value: userAgents.mb});
-    return {
-        requestHeaders: newHeaders,
-    };
-}
-
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -243,11 +252,3 @@ function notifyUpdatedUAOutdated() {
         });
     }
 }
-
-const SEARCH_TYPE_PC_SEARCH = 0;
-const SEARCH_TYPE_MB_SEARCH = 1;
-const STATUS_NONE = 0;
-const STATUS_BUSY = 1;
-const STATUS_DONE = 20;
-const STATUS_WARNING = 30;
-const STATUS_ERROR = 3;

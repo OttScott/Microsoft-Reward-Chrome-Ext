@@ -23,18 +23,26 @@ class ErrorWithSourceInnerException extends Error {
 
 class FetchFailedException extends ErrorWithSourceInnerException {
     constructor(source, innerException, message) {
-        if (innerException == undefined) {
+        console.log('FetchFailedException details:', {
+            source: source,
+            innerException: innerException,
+            message: message
+        });
+
+        if (!innerException) {
             innerException = {
-                message: undefined,
-                name: undefined,
+                message: 'No inner exception details available',
+                name: 'UnknownError',
+                stack: new Error().stack
             };
         }
 
         if (!message) {
-            message = `Fetch failed because an exception occurred::${innerException.message}`;
+            message = `Fetch failed at ${source}: ${innerException.message || 'Unknown error'}`;
         }
+
         super(source, innerException, message);
-        this.name = 'FetchFailed::'+innerException.name;
+        this.name = 'FetchFailed::' + (innerException.name || 'UnknownError');
     }
 }
 

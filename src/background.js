@@ -1,13 +1,37 @@
 'use strict';
 
+// Initialize variables
+let developer = false;
+let userAgents;
+let _compatibilityMode;
+let _pcUaOverrideEnable;
+let _mbUaOverrideEnable;
+let _pcUaOverrideValue;
+let _mbUaOverrideValue;
+
+// Initialize core objects
+const googleTrend = new GoogleTrend();
+const userDailyStatus = new DailyRewardStatus();
+const searchQuest = new SearchQuest(googleTrend);
+
+console.log('Background script loading - ' + new Date().toISOString());
+
 function onExtensionLoad() {
-    setBadge(new GreyBadge());
-    loadSavedSettings();
-    getDeveloperSettings();
-    setDelayedInitialisation(5000);
+    console.log('Microsoft Rewards Bot: Extension starting...');
+    try {
+        setBadge(new GreyBadge());
+        console.log('Badge set to grey');
+        loadSavedSettings();
+        getDeveloperSettings();
+        console.log('Microsoft Rewards Bot: Scheduling initialization...');
+        setDelayedInitialisation(5000);
+    } catch (error) {
+        console.error('Error in onExtensionLoad:', error);
+    }
 }
 
 function loadSavedSettings() {
+    console.log('Loading saved settings...');
     chrome.storage.sync.get({
         compatibilityMode: false,
         pcUaOverrideEnable: false,
@@ -52,11 +76,14 @@ function setDelayedInitialisation(ms) {
 }
 
 function initialize() {
+    console.log('Microsoft Rewards Bot: Initialization started');
     doBackgroundWork();
 
+    console.log('Setting up background work interval...');
     // check every 120 minutes for possible new promotion
     setInterval(
         function () {
+            console.log('Running scheduled background work...');
             doBackgroundWork();
         },
         WORKER_ACTIVATION_INTERVAL,
@@ -64,7 +91,9 @@ function initialize() {
 }
 
 async function doBackgroundWork() {
+    console.log('Background work starting...');
     if (searchQuest.jobStatus == STATUS_BUSY || userDailyStatus.jobStatus == STATUS_BUSY) {
+        console.log('Work already in progress, skipping...');
         return;
     }
 
@@ -125,41 +154,45 @@ async function doSearchQuests() {
 const WORKER_ACTIVATION_INTERVAL = 7200000; // Interval at which automatic background works are carried out, in ms.
 const WAIT_FOR_ONLINE_TIMEOUT = 60000;
 
-const googleTrend = new GoogleTrend();
-const userDailyStatus = new DailyRewardStatus();
-const searchQuest = new SearchQuest(googleTrend);
-let developer = false;
-let userAgents;
-let _compatibilityMode;
-let _pcUaOverrideEnable;
-let _mbUaOverrideEnable;
-let _pcUaOverrideValue;
-let _mbUaOverrideValue;
-
-chrome.runtime.onInstalled.addListener(function (details) {
-    if (details.reason == 'install') {
-
-    }
-    if (details.reason == 'update') {
-
-    }
+// Basic runtime setup
+chrome.runtime.onInstalled.addListener((details) => {
+    console.log('Extension installed or updated:', details.reason);
+    onExtensionLoad();
 });
 
-chrome.runtime.onMessage.addListener(function (request) {
-    if (request.action == 'checkStatus') {
-        doBackgroundWork();
+// Message handling
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    console.log('Message received:', message);
+    switch (message.action) {
+        case 'checkStatus':
+            doBackgroundWork();
+            sendResponse({success: true});
+            break;
+        case 'updateOptions':
+            _compatibilityMode = message.content.compatibilityMode;
+            _pcUaOverrideEnable = message.content.pcUaOverrideEnable;
+            _mbUaOverrideEnable = message.content.mbUaOverrideEnable;
+            _pcUaOverrideValue = message.content.pcUaOverrideValue;
+            _mbUaOverrideValue = message.content.mbUaOverrideValue;
+            sendResponse({success: true});
+            break;
+        case 'copyDebugInfo':
+            getDebugInfo();
+            sendResponse({success: true});
+            break;
     }
-    if (request.action == 'updateOptions') {
-        _compatibilityMode = request.content.compatibilityMode;
-        _pcUaOverrideEnable = request.content.pcUaOverrideEnable;
-        _mbUaOverrideEnable = request.content.mbUaOverrideEnable;
-        _pcUaOverrideValue = request.content.pcUaOverrideValue;
-        _mbUaOverrideValue = request.content.mbUaOverrideValue;
-        return;
-    }
-    if (request.action == 'copyDebugInfo') {
-        getDebugInfo();
-    }
+    return true; // Required to use sendResponse asynchronously
 });
 
-onExtensionLoad();
+// Service worker events
+self.addEventListener('install', event => {
+    console.log('Service worker installing...');
+    self.skipWaiting();
+});
+
+self.addEventListener('activate', event => {
+    console.log('Service worker activating...');
+    event.waitUntil(clients.claim());
+});
+
+console.log('Background script initialization complete');

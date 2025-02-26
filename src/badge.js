@@ -32,7 +32,7 @@ class Badge {
     }
 
     setIcon() {
-        chrome.browserAction.setIcon({
+        chrome.action.setIcon({  // Change from browserAction to action
             path: this.icon,
         });
     }
@@ -43,7 +43,7 @@ class Badge {
             txt = '';
         }
 
-        chrome.browserAction.setBadgeText({
+        chrome.action.setBadgeText({  // Change from browserAction to action
             text: txt,
         });
     }
@@ -52,7 +52,7 @@ class Badge {
         if (!this.backgroundColor) {
             return;
         }
-        chrome.browserAction.setBadgeBackgroundColor({
+        chrome.action.setBadgeBackgroundColor({  // Change from browserAction to action
             'color': this.backgroundColor,
         });
     }

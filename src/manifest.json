@@ -1,5 +1,5 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Microsoft Rewards Bot",
   "version": "2.24.2.1",
   "icons": {
@@ -12,33 +12,47 @@
   "description": "A Chrome extension for Microsoft Rewards that automatically clears PC, mobile and EDGE search quests and displays daily point countdown.",
 
   "background": {
-    "persistent": true,
-    "scripts": [
-      "status/DailyQuest.js",
-      "status/DailyRewardStatus.js",
-      "quest/searchQuest.js",
-      "quest/quizDailyQuest.js",
-      "googleTrend.js",
-      "utility.js",
-      "badge.js",
-      "exception.js",
-      "background.js",
-      "test.js"
-    ]
+    "service_worker": "background-wrapper.js"
   },
 
-  "browser_action": {
+  "action": {
     "default_title": "Microsoft Rewards Bot",
     "default_popup": "popup/popup.html"
   },
 
   "permissions": [
+    "webRequest",
+    "storage",
+    "notifications",
+    "declarativeNetRequest",
+    "scripting"
+  ],
+
+  "host_permissions": [
     "https://trends.google.com/trends/*",
     "https://*.microsoft.com/*",
-    "https://*.bing.com/*",
-    "webRequest",
-    "webRequestBlocking",
-    "storage",
-    "notifications"
-  ]
+    "https://*.bing.com/*"
+  ],
+
+  "declarative_net_request": {
+    "rule_resources": [{
+      "id": "ruleset",
+      "enabled": true,
+      "path": "rules.json"
+    }]
+  },
+
+  "web_accessible_resources": [{
+    "resources": [
+      "constants.js",
+      "background.js",
+      "googleTrend.js",
+      "utility.js",
+      "badge.js",
+      "exception.js",
+      "status/*.js",
+      "quest/*.js"
+    ],
+    "matches": ["<all_urls>"]
+  }]
 }

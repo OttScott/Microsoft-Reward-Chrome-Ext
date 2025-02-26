@@ -1,3 +1,11 @@
+const DEBUG = true;  // Add this at the top
+
+function debugLog(...args) {
+    if (DEBUG) {
+        console.log(new Date().toISOString(), ...args);
+    }
+}
+
 let _prevWeekDay = -1;
 
 function checkNewDay() {
@@ -30,7 +38,7 @@ function getTodayDate() {
     if (mm < 10) {
         mm = '0' + mm;
     }
-    return `${mm}/${dd}/${today.getFullYear()}`;
+    return `${mm}/${today.getFullYear()}`;
 }
 
 function resetDayBoundParams() {
@@ -79,9 +87,11 @@ async function copyTextToClipboard(text) {
 
 async function getDebugInfo() {
     let text = '[';
+    console.log('Collecting debug info...');
 
     await userDailyStatus.getUserStatusJson().then(
         (statusJson) => {
+            console.log('Retrieved user status JSON:', statusJson);
             info = {
                 'IsError': statusJson.IsError,
                 'IsRewardsUser': statusJson.IsRewardsUser,
@@ -96,25 +106,30 @@ async function getDebugInfo() {
             text += JSON.stringify(info);
         },
     ).catch((ex) => {
+        console.error('Error getting user status:', ex);
         text += '"' + ex.message + '"';
     });
 
     await userDailyStatus.getDetailedUserStatusJson().then(
         (statusJson) => {
+            console.log('Retrieved detailed status JSON:', statusJson);
             info = {
                 'punchCards': statusJson.punchCards,
             };
             text += ',' + JSON.stringify(info);
         },
     ).catch((ex) => {
+        console.error('Error getting detailed status:', ex);
         text += ',"' + ex.message + '"';
     });
 
     text += ']';
+    console.log('Debug info collected:', text);
     copyTextToClipboard(text);
 }
 
 async function getUA() {
+    debugLog('Getting user agents...');
     if (_pcUaOverrideEnable && _mbUaOverrideEnable) {
         userAgents = {
             'pc': _pcUaOverrideValue,
@@ -137,79 +152,99 @@ async function getUA() {
 }
 
 async function getStableUA() {
+    console.log('Fetching stable user agents...');
     const controller = new AbortController();
     const signal = controller.signal;
-    const fetchProm = fetch('https://raw.githubusercontent.com/tmxkn1/Microsoft-Reward-Chrome-Ext/master/useragents.json', {method: 'GET', signal: signal});
+    const url = 'https://raw.githubusercontent.com/tmxkn1/Microsoft-Reward-Chrome-Ext/master/useragents.json';
+    
+    try {
+        const fetchProm = fetch(url, {method: 'GET', signal: signal});
+        setTimeout(() => controller.abort(), 3000);
 
-    setTimeout(() => controller.abort(), 3000);
+        const response = await fetchProm;
+        console.log('Stable UA fetch response:', response.status, response.statusText);
 
-    await fetchProm.then(
-        async (response) => {
-            if (!response.ok) {
-                throw await response.text();
-            }
-            return response.text();
-        },
-    ).then(
-        (text) => {
-            const ua = JSON.parse(text);
-            userAgents = {
-                'pc': ua.stable.edge_win,
-                'mb': ua.stable.chrome_ios,
-                'pcSource': 'stable',
-                'mbSource': 'stable',
-            };
-        },
-    ).catch((ex) => {
-        if (ex.name == 'AbortError') {
-            throw new FetchFailedException('getStableUA::_awaitFetchPromise', ex, 'Fetch timed out. Failed to update user agents. Perhaps, Github server is offline.');
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Stable UA fetch failed:', errorText);
+            throw new Error(errorText);
         }
-        throw new ResponseUnexpectedStatusException('getStableUA::_awaitFetchPromise', ex);
-    });
+
+        const text = await response.text();
+        const ua = JSON.parse(text);
+        userAgents = {
+            'pc': ua.stable.edge_win,
+            'mb': ua.stable.chrome_ios,
+            'pcSource': 'stable',
+            'mbSource': 'stable',
+        };
+    } catch (ex) {
+        console.error('Stable UA fetch error:', {
+            name: ex.name,
+            message: ex.message,
+            stack: ex.stack
+        });
+        
+        if (ex.name === 'AbortError') {
+            throw new FetchFailedException('getStableUA', ex, 'Fetch timed out. Failed to update user agents. Perhaps, Github server is offline.');
+        }
+        throw new FetchFailedException('getStableUA', ex);
+    }
 }
 
 async function getUpdatedUA(type='both') {
+    console.log('Fetching updated user agents for type:', type);
     const controller = new AbortController();
     const signal = controller.signal;
-    const fetchProm = fetch('https://raw.githubusercontent.com/tmxkn1/UpdatedUserAgents/master/useragents.json', {method: 'GET', signal: signal});
+    const url = 'https://raw.githubusercontent.com/tmxkn1/UpdatedUserAgents/master/useragents.json';
+    
+    try {
+        const fetchProm = fetch(url, {method: 'GET', signal: signal});
+        setTimeout(() => controller.abort(), 3000);
 
-    setTimeout(() => controller.abort(), 3000);
+        const response = await fetchProm;
+        console.log('Updated UA fetch response:', response.status, response.statusText);
 
-    await fetchProm.then(
-        async (response) => {
-            if (!response.ok) {
-                throw await response.text();
-            }
-            return response.text();
-        },
-    ).then(
-        (text) => {
-            const ua = JSON.parse(text);
-            if (type == 'both') {
-                userAgents.pc= ua.edge.windows;
-                userAgents.mb = ua.chrome.ios;
-                userAgents.pcSource = 'updated';
-                userAgents.mbSource = 'updated';
-            } else if (type == 'pc') {
-                userAgents.pc = ua.edge.windows;
-                userAgents.pcSource = 'updated';
-            } else if (type == 'mb') {
-                userAgents.mb = ua.chrome.ios;
-                userAgents.mbSource = 'updated';
-            };
-            assertUA();
-        },
-    ).catch((ex) => {
-        if (ex.name == 'AbortError') {
-            throw new FetchFailedException('getUpdatedUA::_awaitFetchPromise', ex, 'Fetch timed out. Failed to update user agents. Do you have internet connection? Otherwise, perhaps Github server is down.');
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Updated UA fetch failed:', errorText);
+            throw new Error(errorText);
         }
-        throw new ResponseUnexpectedStatusException('getUpdatedUA::_awaitFetchPromise', ex);
-    });
+
+        const text = await response.text();
+        const ua = JSON.parse(text);
+        if (type == 'both') {
+            userAgents.pc = ua.edge.windows;
+            userAgents.mb = ua.chrome.ios;
+            userAgents.pcSource = 'updated';
+            userAgents.mbSource = 'updated';
+        } else if (type == 'pc') {
+            userAgents.pc = ua.edge.windows;
+            userAgents.pcSource = 'updated';
+        } else if (type == 'mb') {
+            userAgents.mb = ua.chrome.ios;
+            userAgents.mbSource = 'updated';
+        }
+        assertUA();
+    } catch (ex) {
+        console.error('Updated UA fetch error:', {
+            name: ex.name,
+            message: ex.message,
+            stack: ex.stack
+        });
+        
+        if (ex.name === 'AbortError') {
+            throw new FetchFailedException('getUpdatedUA', ex, 'Fetch timed out. Failed to update user agents. Do you have internet connection? Otherwise, perhaps Github server is down.');
+        }
+        throw new FetchFailedException('getUpdatedUA', ex);
+    }
 }
 
 function assertUA() {
-    console.log('User agents: ' + JSON.stringify(userAgents));
+    console.log('Asserting user agents:', userAgents);
     if (!userAgents.pc || !userAgents.mb) {
-        throw new UserAgentInvalidException('Failed to assert user agents. \n UA:\n' + JSON.stringify(userAgents));
+        const error = new UserAgentInvalidException('Failed to assert user agents. \n UA:\n' + JSON.stringify(userAgents));
+        console.error('UA assertion failed:', error);
+        throw error;
     }
 }
