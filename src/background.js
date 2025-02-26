@@ -246,8 +246,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             chrome.storage.sync.set({
                 baseSearchCount: message.content.baseSearchCount,
                 searchVariation: message.content.searchVariation
-            }, () => {
+            }, async () => {
                 console.log('Search settings updated:', message.content);
+                // Reload search settings and recalculate counts
+                await searchQuest._loadSearchSettings();
+                // Trigger a status update to refresh display
+                await userDailyStatus.update();
                 sendResponse({success: true});
             });
             break;

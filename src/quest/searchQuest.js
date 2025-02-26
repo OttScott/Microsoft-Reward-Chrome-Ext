@@ -1,9 +1,20 @@
 class SearchQuest {
     constructor(googleTrend) {
         this._googleTrend_ = googleTrend;
-        this._searchIntervalMS = this._searchIntervalMS = 900000 + Math.random()*1000*60*5;
+        // Set to 15 minutes + random 0-15 minutes
+        const baseInterval = 15 * 60 * 1000; // 15 minutes in ms
+        const randomInterval = Math.floor(Math.random() * 900) * 1000; // 0-900 seconds in ms
+        this._searchIntervalMS = baseInterval + randomInterval;
+        
+        console.log('Search interval configured:', {
+            base: '15 minutes',
+            random: `${Math.floor(randomInterval/1000)} seconds`,
+            total: `${Math.floor(this._searchIntervalMS/1000)} seconds`
+        });
+
         this.reset();
         this._loadSearchSettings();
+        this._targetSearchCount = null;
     }
 
     reset() {
@@ -13,6 +24,7 @@ class SearchQuest {
         this._currentSearchCount_ = 0;
         this._currentSearchType_ = null;
         this._jobStatus_ = STATUS_NONE;
+        this._targetSearchCount = null;
     }
 
     get jobStatus() {
@@ -59,7 +71,14 @@ class SearchQuest {
 
     async _startSearchQuests() {
         await this._doPcSearch();
-        await this._doMbSearch();
+        
+        const settings = await chrome.storage.sync.get({ disableMobile: false });
+        if (!settings.disableMobile) {
+            await this._doMbSearch();
+        } else {
+            console.log('Mobile searches disabled in settings');
+        }
+        
         this._quitSearchCleanUp();
     }
 
@@ -68,9 +87,25 @@ class SearchQuest {
         // 0 - successful; 1 - pc search failed; 2 - mb search failed; 3 - both failed
         const pcSearchProgBefore = this._status_.pcSearchStatus.progress;
         const mbSearchProgBefore = this._status_.mbSearchStatus.progress;
+        
+        console.log('Search progress before update:', {
+            pc: pcSearchProgBefore,
+            mobile: mbSearchProgBefore
+        });
+        
         await this._status_.update();
-        const flag = (!this._status_.pcSearchStatus.isValidAndCompleted && (pcSearchProgBefore == this._status_.pcSearchStatus.progress));
-        return flag + 2 * (!this._status_.mbSearchStatus.isValidAndCompleted && (mbSearchProgBefore == this._status_.mbSearchStatus.progress));
+        
+        console.log('Search progress after update:', {
+            pc: this._status_.pcSearchStatus.progress,
+            mobile: this._status_.mbSearchStatus.progress
+        });
+
+        const pcFailed = !this._status_.pcSearchStatus.isValidAndCompleted && 
+            (pcSearchProgBefore == this._status_.pcSearchStatus.progress);
+        const mbFailed = !this._status_.mbSearchStatus.isValidAndCompleted && 
+            (mbSearchProgBefore == this._status_.mbSearchStatus.progress);
+
+        return (pcFailed ? 1 : 0) + (mbFailed ? 2 : 0);
     }
 
     async _getAlternativeUA(flag) {
@@ -113,6 +148,8 @@ class SearchQuest {
 
     _initiateSearch() {
         this._currentSearchCount_ = 0;
+        this._targetSearchCount = this._calculateSearchCount();
+        console.log(`Initiated ${this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'PC' : 'Mobile'} search session targeting ${this._targetSearchCount} searches`);
     }
 
     _preparePCSearch() {
@@ -141,14 +178,17 @@ class SearchQuest {
         }
 
         const searchType = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'PC' : 'Mobile';
-        const searchWord = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ?
-            this._googleTrend_.nextPCWord :
-            this._googleTrend_.nextMBWord;
-
-        console.log(`Performing ${searchType} search ${this._currentSearchCount_ + 1}: "${searchWord}"`);
-
+        let searchWord;
+        
         try {
-            const response = await fetch(this._getBingSearchUrl());
+            // Get word and cache it
+            searchWord = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ?
+                await this._googleTrend_.nextPCWord :
+                await this._googleTrend_.nextMBWord;
+                
+            console.log(`Performing ${searchType} search ${this._currentSearchCount_ + 1}: "${searchWord}"`);
+            
+            const response = await fetch(`https://www.bing.com/search?q=${searchWord}&form=QBRE`);
             if (response.status != 200) {
                 throw new FetchResponseAnomalyException('Search');
             }
@@ -156,48 +196,70 @@ class SearchQuest {
             this._currentSearchCount_++;
             console.log(`${searchType} search completed. Progress: ${this._currentSearchCount_}/${this._getCurrentMaxSearches()}`);
             
+            // More detailed timing log
+            const waitMs = this._searchIntervalMS;
+            const nextTime = new Date(Date.now() + waitMs);
+            console.log(`Search timing:`, {
+                waitSeconds: Math.floor(waitMs/1000),
+                nextSearch: nextTime.toLocaleTimeString(),
+                randomization: Math.floor((waitMs - 30000)/1000)
+            });
+            
             await sleep(this._searchIntervalMS);
             await this._requestBingSearch();
         } catch (ex) {
+            console.error('Search failed:', {
+                type: searchType,
+                term: searchWord,
+                error: ex
+            });
             throw new FetchFailedException('Search', ex);
         }
     }
 
     async _loadSearchSettings() {
         const settings = await chrome.storage.sync.get({
-            baseSearchCount: 30,  // default value
-            searchVariation: 5    // default variation
+            baseCount: this._baseSearchCount,
+            variation: this._searchVariation
         });
         
-        this._baseSearchCount = settings.baseSearchCount;
-        this._searchVariation = settings.searchVariation;
+        // Return new calculated count for display
+        return this._getCurrentMaxSearches();
     }
 
-    _getCurrentMaxSearches() {
-        if (!this._baseSearchCount) {
-            return this._status_.pcSearchStatus.searchNeededCount;
+    _calculateSearchCount() {
+        // Ensure we have base count and status before calculating
+        if (!this._baseSearchCount || !this._status_) {
+            console.log('Using default search count - settings or status not ready');
+            return 30; // Default count if not configured
         }
 
         // Get random number between 0 and 1
         const randomFactor = Math.random();
-        
-        // Convert 0-1 range to -variation to +variation
-        // 0.0 -> -variation
-        // 0.5 -> 0
-        // 1.0 -> +variation
         const variation = (randomFactor - 0.5) * 2 * this._searchVariation;
-        
-        // Round to nearest integer
         const searchCount = Math.round(this._baseSearchCount + variation);
         
-        console.log(`Search count calculation:
-            Base: ${this._baseSearchCount}
-            Random factor: ${randomFactor.toFixed(3)}
-            Variation: ${variation.toFixed(1)} (±${this._searchVariation})
-            Final count: ${searchCount}`
-        );
+        console.log(`Search count calculation:`, {
+            base: this._baseSearchCount,
+            variation: this._searchVariation,
+            random: randomFactor.toFixed(3),
+            final: searchCount
+        });
         
         return searchCount;
+    }
+
+    _getCurrentMaxSearches() {
+        // Use stored count or fall back to safe default
+        if (!this._status_) {
+            console.warn('Status not initialized, using default search count');
+            return this._targetSearchCount ?? 30;
+        }
+
+        return this._targetSearchCount ?? 
+            (this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 
+                this._status_.pcSearchStatus.searchNeededCount : 
+                this._status_.mbSearchStatus.searchNeededCount);
     }
 
     _getBingSearchUrl() {
@@ -209,6 +271,19 @@ class SearchQuest {
     }
 
     _isCurrentSearchCompleted() {
+        const maxSearches = this._getCurrentMaxSearches();
+        const type = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'PC' : 'Mobile';
+        const needed = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 
+            this._status_.pcSearchStatus.searchNeededCount :
+            this._status_.mbSearchStatus.searchNeededCount;
+
+        console.log(`${type} search completion check:`, {
+            current: this._currentSearchCount_,
+            max: maxSearches,
+            needed: needed,
+            type: type
+        });
+
         return this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ?
             this._currentSearchCount_ >= this._status_.pcSearchStatus.searchNeededCount :
             this._currentSearchCount_ >= this._status_.mbSearchStatus.searchNeededCount;

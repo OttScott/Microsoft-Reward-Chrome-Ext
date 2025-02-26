@@ -51,7 +51,8 @@
       "badge.js",
       "exception.js",
       "status/*.js",
-      "quest/*.js"
+      "quest/*.js",
+      "data/backup-searches.txt"
     ],
     "matches": ["<all_urls>"]
   }]

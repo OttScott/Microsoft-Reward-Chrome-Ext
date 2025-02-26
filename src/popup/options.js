@@ -33,7 +33,8 @@ function saveOptions() {
         endTime: document.getElementById('endTime').value,
         enableSchedule: document.getElementById('enableSchedule').checked,
         baseSearchCount: parseInt(document.getElementById('baseSearchCount').value) || 30,
-        searchVariation: parseInt(document.getElementById('searchVariation').value) || 5
+        searchVariation: parseInt(document.getElementById('searchVariation').value) || 5,
+        disableMobile: document.getElementById('disableMobile').checked
     };
 
     chrome.storage.sync.set(options, () => {
@@ -62,7 +63,8 @@ function restoreOptions() {
         endTime: '17:00',
         enableSchedule: false,
         baseSearchCount: 30,    // Default values
-        searchVariation: 5
+        searchVariation: 5,
+        disableMobile: false
     }, function (options) {
         getElementCountdownAlgorithm().checked = options.compatibilityMode;
         getElementPcUaOverrideEnable().checked = options.pcUaOverrideEnable;
@@ -74,6 +76,7 @@ function restoreOptions() {
         document.getElementById('enableSchedule').checked = options.enableSchedule;
         document.getElementById('baseSearchCount').value = options.baseSearchCount;
         document.getElementById('searchVariation').value = options.searchVariation;
+        document.getElementById('disableMobile').checked = options.disableMobile;
     });
 }
 
