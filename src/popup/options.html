@@ -115,6 +115,14 @@
                     <label for="disableMobile">Disable mobile searches:</label>
                     <input type="checkbox" id="disableMobile" />
                 </div>
+                <div class="option-row">
+                    <label for="baseSearchInterval">Base search interval (minutes):</label>
+                    <input type="number" id="baseSearchInterval" min="1" max="60" />
+                </div>
+                <div class="option-row">
+                    <label for="intervalVariation">Interval variation (seconds):</label>
+                    <input type="number" id="intervalVariation" min="0" max="900" />
+                </div>
                 <div class="info-text">
                     Each search session will perform (base &plusmn; variation) searches
                     <br>
@@ -129,7 +137,7 @@
 
         <footer>
             <div>
-                <span>&copy; 2022 tmxkn1 - </span>
+                <span>&copy; 2025 tmxkn1 - </span>
                 <a target="_blank" href="https://github.com/tmxkn1/Microsoft-Reward-Chrome-Ext">Github Repository</a>
                 <span> - </span>
                 <a target="_release" href="https://github.com/tmxkn1/Microsoft-Reward-Chrome-Ext/releases">Changelog</a>

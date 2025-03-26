@@ -34,7 +34,9 @@ function saveOptions() {
         enableSchedule: document.getElementById('enableSchedule').checked,
         baseSearchCount: parseInt(document.getElementById('baseSearchCount').value) || 30,
         searchVariation: parseInt(document.getElementById('searchVariation').value) || 5,
-        disableMobile: document.getElementById('disableMobile').checked
+        disableMobile: document.getElementById('disableMobile').checked,
+        baseSearchInterval: document.getElementById('baseSearchInterval').value,
+        intervalVariation: document.getElementById('intervalVariation').value
     };
 
     chrome.storage.sync.set(options, () => {
@@ -64,7 +66,9 @@ function restoreOptions() {
         enableSchedule: false,
         baseSearchCount: 30,    // Default values
         searchVariation: 5,
-        disableMobile: false
+        disableMobile: false,
+        baseSearchInterval: 15,  // 15 minutes default
+        intervalVariation: 300   // 5 minutes (300 seconds) variation
     }, function (options) {
         getElementCountdownAlgorithm().checked = options.compatibilityMode;
         getElementPcUaOverrideEnable().checked = options.pcUaOverrideEnable;
@@ -77,6 +81,8 @@ function restoreOptions() {
         document.getElementById('baseSearchCount').value = options.baseSearchCount;
         document.getElementById('searchVariation').value = options.searchVariation;
         document.getElementById('disableMobile').checked = options.disableMobile;
+        document.getElementById('baseSearchInterval').value = options.baseSearchInterval;
+        document.getElementById('intervalVariation').value = options.intervalVariation;
     });
 }
 

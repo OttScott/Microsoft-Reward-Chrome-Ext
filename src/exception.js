@@ -99,3 +99,13 @@ class NotRewardUserException extends Error {
         this.name = 'UserNotLoggedIn';
     }
 }
+
+class NetworkException extends Error {
+    constructor(message) {
+        super(message || 'Network connectivity issue detected');
+        this.name = 'NetworkException';
+    }
+}
+
+// Make sure it's added to the global scope
+self.NetworkException = NetworkException;

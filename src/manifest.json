@@ -17,21 +17,24 @@
 
   "action": {
     "default_title": "Microsoft Rewards Bot",
-    "default_popup": "popup/popup.html"
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "img/bingRwLogo@1x.png",
+      "24": "img/bingRwLogo@1.5x.png",
+      "32": "img/bingRwLogo@2x.png"
+    }
   },
 
   "permissions": [
-    "webRequest",
     "storage",
-    "notifications",
     "declarativeNetRequest",
-    "scripting"
+    "tabs",
+    "notifications"
   ],
 
   "host_permissions": [
-    "https://trends.google.com/trends/*",
-    "https://*.microsoft.com/*",
-    "https://*.bing.com/*"
+    "https://*.bing.com/*",
+    "https://*.microsoft.com/*"
   ],
 
   "declarative_net_request": {
@@ -42,18 +45,23 @@
     }]
   },
 
-  "web_accessible_resources": [{
-    "resources": [
-      "constants.js",
-      "background.js",
-      "googleTrend.js",
-      "utility.js",
-      "badge.js",
-      "exception.js",
-      "status/*.js",
-      "quest/*.js",
-      "data/backup-searches.txt"
-    ],
-    "matches": ["<all_urls>"]
-  }]
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "constants.js",
+        "background.js",
+        "googleTrend.js",
+        "utility.js",
+        "badge.js",
+        "exception.js",
+        "status/*.js",
+        "quest/*.js",
+        "data/backup-searches.txt",
+        "popup/iframe-helper.js",
+        "popup/popup.html",
+        "popup/options.html"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

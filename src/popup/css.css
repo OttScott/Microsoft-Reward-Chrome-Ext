@@ -120,3 +120,277 @@ input[type=checkbox] + label + input[class="checked_shown"] {
 input[type=checkbox]:checked + label + input[class="checked_shown"] {
     display: inline;
   }
+
+/* Add new styles for the rewards button */
+.rewards-direct-link {
+    text-align: center;
+    padding: 8px 0;
+    background-color: #f5f5f5;
+    border-top: 1px solid #e0e0e0;
+}
+
+.rewards-button {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    background-color: #0078D4;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 12px;
+    transition: background-color 0.2s;
+    margin-left: 10px;
+    white-space: nowrap;
+}
+
+.rewards-button:hover {
+    background-color: #106EBE;
+    text-decoration: none;
+}
+
+.rewards-button svg {
+    margin-right: 6px;
+}
+
+/* Updated rewards counter with daily stats */
+.rewards-counter {
+    padding: 8px 12px;
+    background-color: #f5f5f5;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Update the counter styles to be more compact */
+.daily-stats {
+    flex: 1;
+}
+
+.stats-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.stats-metric {
+    text-align: center;
+}
+
+.stats-value {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    font-weight: 600;
+    font-size: 20px;
+}
+
+.stats-value.earned {
+    color: #107C10; /* Microsoft green */
+}
+
+.stats-target {
+    font-size: 14px;
+    color: #666;
+}
+
+.stats-label {
+    font-size: 10px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+    display: block;
+}
+
+.daily-progress {
+    width: 100%;
+    margin-top: 3px;
+}
+
+.progress-track {
+    height: 4px;
+    background-color: #e0e0e0;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: #107C10; /* Microsoft green */
+    border-radius: 2px;
+    transition: width 0.5s ease;
+}
+
+.progress-fill.completed {
+    background-color: #FF8C00; /* Orange when goal is met */
+}
+
+/* Add animated gradient for countdown bar */
+@keyframes countdown-pulse {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.countdown-progress-bar {
+  background: linear-gradient(90deg, #fbbc05 0%, #ff9900 50%, #fbbc05 100%);
+  background-size: 200% 100%;
+  animation: countdown-pulse 3s infinite;
+}
+
+.mobile-search .countdown-progress-bar {
+  background: linear-gradient(90deg, #34a853 0%, #0f9d58 50%, #34a853 100%);
+  background-size: 200% 100%;
+  animation: countdown-pulse 3s infinite;
+}
+
+/* Search status box styling */
+.search-status-info {
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 4px;
+  background-color: #f8f9fa;
+  border: 1px solid #ddd;
+}
+
+.status-banner {
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.pc-search {
+  background-color: #f0f7ff;
+  border: 1px solid #d0e3ff;
+}
+
+.mobile-search {
+  background-color: #f0fff0;
+  border: 1px solid #d0ffd0;
+}
+
+.search-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.time-remaining {
+  color: #666;
+}
+
+.progress-bars {
+  margin-bottom: 12px;
+}
+
+.progress-container {
+  height: 8px;
+  background-color: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.progress-bar {
+  height: 100%;
+  background-color: #4285f4;
+  border-radius: 4px;
+}
+
+/* Search term container */
+.search-term-container, .next-search-container {
+  margin: 8px 0;
+  padding: 6px 10px;
+  background-color: white;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.next-search-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.skip-button {
+  padding: 3px 8px;
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.skip-button:hover {
+  background-color: #e8e8e8;
+}
+
+.skip-button:disabled {
+  background-color: #f0f0f0;
+  color: #999;
+  cursor: not-allowed;
+}
+
+/* Schedule info */
+.schedule-info {
+  text-align: center;
+  color: #666;
+  font-style: italic;
+  padding: 10px;
+}
+
+/* Connection status indicator */
+.connection-status {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+}
+
+.connected {
+  background-color: #34a853;  /* Green */
+}
+
+.disconnected {
+  background-color: #ea4335;  /* Red */
+}
+
+/* Additional search status enhancements */
+.search-header {
+  margin-bottom: 10px;
+}
+
+/* Update iframe container to be full height */
+.iframe-container {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Set iframe to fill available space */
+#msr_iframe {
+    flex: 1 1 auto;
+    border: none;
+    width: 100%;
+    height: 480px;
+}
+
+/* Footer link style */
+.iframe-footer {
+    padding: 8px 12px;
+    background-color: #f5f5f5;
+    border-top: 1px solid #e0e0e0;
+    text-align: center;
+}

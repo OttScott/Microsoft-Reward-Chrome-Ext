@@ -8,6 +8,7 @@
             background-color: #ffffff;
             margin: 0;
             width: 320px;
+            overflow-y: hidden; /* Prevent scrollbars */
         }
 
         div {
@@ -95,45 +96,417 @@
         .announcement {
             display: none;
         }
+        
+        /* Updated search status styles */
+        .search-status-info {
+            margin: 0;
+            padding: 5px 10px;
+        }
+        
+        .status-banner {
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 12px;
+            border-left: 4px solid #4285f4;
+            margin-bottom: 5px;
+        }
+        
+        .pc-search {
+            border-color: #4285f4; /* Blue for PC search */
+        }
+        
+        .mobile-search {
+            border-color: #0f9d58; /* Green for mobile search */
+        }
+        
+        /* Search header with flexible layout */
+        .search-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        
+        /* Container for both progress bars */
+        .progress-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        /* Progress bar containers */
+        .progress-container {
+            height: 6px;
+            background-color: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        /* Progress labels */
+        .progress-label {
+            position: absolute;
+            font-size: 8px;
+            color: #666;
+            right: 0;
+            top: -12px;
+        }
+        
+        /* Search progress bar */
+        .progress-bar {
+            height: 100%;
+            background-color: #4285f4;
+            border-radius: 3px;
+            transition: width 1s;
+        }
+        
+        /* Countdown progress bar */
+        .countdown-progress-bar {
+            height: 100%;
+            background-color: #fbbc05; /* Yellow */
+            border-radius: 3px;
+            transition: width 1s linear;
+        }
+        
+        .mobile-search .progress-bar {
+            background-color: #0f9d58;
+        }
+        
+        .mobile-search .countdown-progress-bar {
+            background-color: #34a853; /* Darker green */
+        }
+        
+        .time-remaining {
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .search-term-container {
+            font-size: 10px;
+            font-style: italic;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 5px;
+            color: #666;
+        }
+
+        /* Make the layout more compact */
+        #msr_iframe {
+            height: 440px; /* Reduced height to fit rewards counter */
+        }
+
+        /* Create a flex layout for the overall content */
+        .popup-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            flex: 0 0 auto;
+        }
+
+        .iframe-container {
+            flex: 1 1 auto;
+        }
+
+        footer {
+            flex: 0 0 auto;
+        }
+
+        /* Connection status indicator */
+        .connection-status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+            vertical-align: middle;
+        }
+        
+        .connected {
+            background-color: #0f9d58; /* Green */
+        }
+        
+        .disconnected {
+            background-color: #ea4335; /* Red */
+        }
+        
+        .footer-button {
+            background: none;
+            border: none;
+            color: #4285f4;
+            cursor: pointer;
+            font-family: 'Roboto', sans-serif;
+            font-size: 11px;
+            padding: 0;
+            text-decoration: underline;
+        }
+        
+        .footer-button:hover {
+            color: #2a56c6;
+        }
+        
+        .footer-separator {
+            margin: 0 5px;
+        }
+
+        /* Stats bar at top of popup */
+        .stats-container {
+            display: flex;
+            justify-content: space-between;
+            background-color: #f9f9f9;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-family: 'Roboto', sans-serif;
+        }
+        
+        .stats-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .stats-label {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 2px;
+        }
+        
+        .stats-value {
+            font-weight: bold;
+            color: #333;
+            position: relative;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+        
+        .stats-value.updating {
+            animation: stat-update 1.5s ease;
+        }
+        
+        /* Add animation for stats updates */
+        @keyframes stat-update {
+            0% { background-color: transparent; }
+            30% { background-color: #fffbd1; }
+            100% { background-color: transparent; }
+        }
+        
+        .stats-value.earnings {
+            color: #0f9d58;
+        }
+        
+        .stats-value.remaining {
+            color: #4285f4;
+        }
+        
+        /* Progress bar for each search type */
+        .search-progress {
+            display: flex;
+            height: 6px;
+            width: 100%;
+            background: #f0f0f0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 2px;
+        }
+        
+        .search-progress-bar {
+            height: 100%;
+            transition: width 0.3s;
+        }
+        
+        .pc-progress {
+            background-color: #4285f4;
+        }
+        
+        .mb-progress {
+            background-color: #0f9d58;
+        }
+        
+        /* Column in stats bar */
+        .stats-column {
+            text-align: center;
+        }
+
+        /* Rewards counter section styles */
+        .rewards-counter {
+            padding: 8px 12px;
+            background-color: #f5f5f5;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .rewards-count {
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            font-weight: 600;
+            font-size: 16px;
+            color: #107C10; /* Microsoft green */
+        }
+        
+        .rewards-count .points {
+            font-size: 20px;
+            color: #0078D4; /* Microsoft blue */
+        }
+        
+        .rewards-label {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .rewards-button {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            background-color: #0078d7;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 12px;
+            transition: background-color 0.2s;
+        }
+        
+        .rewards-button:hover {
+            background-color: #106ebe;
+            text-decoration: none;
+        }
+        
+        .rewards-button svg {
+            margin-right: 6px;
+        }
+
+        /* Schedule info styling */
+        .schedule-info {
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 12px;
+            border-left: 4px solid #fbbc05; /* Yellow for schedule */
+            margin-bottom: 5px;
+            text-align: center;
+            color: #333;
+        }
+
+        /* Next search term and skip button */
+        .next-search-container {
+            margin-top: 8px;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-top: 1px dashed #ddd;
+            padding-top: 5px;
+        }
+        
+        .next-search-term {
+            font-style: italic;
+            color: #666;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 75%;
+        }
+        
+        .skip-button {
+            background-color: #fbbc05;
+            color: #333;
+            border: none;
+            border-radius: 3px;
+            padding: 2px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .skip-button:hover {
+            background-color: #f9a825;
+        }
+        
+        .skip-button:active {
+            background-color: #f57f17;
+        }
+        
+        .skip-button:disabled {
+            background-color: #e0e0e0;
+            color: #9e9e9e;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 
 <body>
-    <header>
-        <div class="announcement" id="update-available">
-            <div class="ms_l_s ">
-                <a target="_blank" href="https://github.com/tmxkn1/Microsoft-Reward-Chrome-Ext/releases">
-                    <div class="mfo_c_rh fp_row align-center">
-                        <div class="b_attensionText fc_dyn">Extension Update Available</div>
-                        <div class="fc_fix20"><svg class="rw-si chevronRight" width="16" height="16" viewBox="0 0 16 16"
-                                xmlns="http://www.w3.org/2000/svg">
-                                <path
-                                    d="M5.707 15.707l7-7a1 1 0 0 0 0-1.414l-7-7a1 1 0 1 0-1.414 1.414l6.293 6.293-6.293 6.293a1 1 0 1 0 1.414 1.414z"
-                                    fill="#767676"></path>
-                            </svg></div>
-                    </div>
-                </a>
+    <div class="popup-container">
+        <header>
+            <div class="announcement" id="update-available">
+                <div class="ms_l_s ">
+                    <a target="_blank" href="https://github.com/tmxkn1/Microsoft-Reward-Chrome-Ext/releases">
+                        <div class="mfo_c_rh fp_row align-center">
+                            <div class="b_attensionText fc_dyn">Extension Update Available</div>
+                            <div class="fc_fix20"><svg class="rw-si chevronRight" width="16" height="16" viewBox="0 0 16 16"
+                                    xmlns="http://www.w3.org/2000/svg">
+                                    <path
+                                        d="M5.707 15.707l7-7a1 1 0 0 0 0-1.414l-7-7a1 1 0 1 0-1.414 1.414l6.293 6.293-6.293 6.293a1 1 0 1 0 1.414 1.414z"
+                                        fill="#767676"></path>
+                                </svg></div>
+                        </div>
+                    </a>
+                </div>
+                <div class="separator" style="margin:0;"></div>
             </div>
-            <div class="separator" style="margin:0;"></div>
+            
+            <!-- Stats Bar -->
+            <!-- <div class="stats-container" id="stats-container">
+                <div class="stats-column">
+                    <div class="stats-label">TODAY'S POINTS</div>
+                    <div class="stats-value earnings" id="today-earnings">--</div>
+                </div>
+                <div class="stats-column">
+                    <div class="stats-label">REMAINING</div>
+                    <div class="stats-value remaining" id="remaining-points">--</div>
+                </div>
+                <div class="stats-column">
+                    <div class="stats-label">SEARCHES</div>
+                    <div>
+                        <span class="stats-value" id="search-completed">--</span>/<span id="search-total">--</span>
+                        <div class="search-progress">
+                            <div class="search-progress-bar pc-progress" id="pc-progress-bar" style="width: 0%"></div>
+                            <div class="search-progress-bar mb-progress" id="mb-progress-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div> -->
+            
+            <!-- Search status will be injected here -->
+        </header>
+        <div class="iframe-container">
+            <!-- Update the iframe with better attributes for compatibility -->
+            <iframe id="msr_iframe" title="Microsoft Rewards" frameborder="no" scrolling="no"
+                src="https://www.bing.com/rewardsapp/flyout?channel=0" 
+                style="display: block; width: 320px; height: 530px;">
+            </iframe>
         </div>
-    </header>
-    <iframe id="msr_iframe" title="Microsoft Rewards" frameborder="no" scrolling="no" height="523"
-        src="https://www.bing.com/rewardsapp/flyout?channel=0" 
-        style="display: block; width: 320px;">
-    </iframe>    
-    <!-- <iframe id="msr_iframe" frameborder="no" scrolling="no" title="Microsoft News"
-        src="https://www.bing.com/rewardsapp/flyout?channel=0&partnerId=&date=04/26/2023"
-        style="height:517px;width:100%;border:none;overflow:hidden;"></iframe> -->
-    <div class="separator"></div>
-    <footer>
-        <div>
-            <span> &copy; 2025 tmxkn1 - </span>
-            <a target="_blank" href="options.html">Extension Options</a>
-            <span> - </span>
-            <a target="_blank" href="https://github.com/tmxkn1/Microsoft-Reward-Chrome-Ext">Github
-                Repository</a>
-        </div>
-    </footer>
+        <div class="separator"></div>
+        <footer>
+            <div>
+                <span id="connection-status" class="connection-status connected" title="Internet connection status"></span>
+                <span> &copy; 2025 tmxkn1 - </span>
+                <a target="_blank" href="options.html">Options</a>
+                <span class="footer-separator">|</span>
+                <button id="reset-counters" class="footer-button">Reset Counters</button>
+                <span class="footer-separator">|</span>
+                <a target="_blank" href="https://github.com/tmxkn1/Microsoft-Reward-Chrome-Ext">Github</a>
+            </div>
+        </footer>
+    </div>
+    <!-- Add script to help with navigation -->
+    <!-- Make sure iframe-helper.js is loaded first -->
+    <script src="iframe-helper.js"></script>
     <script src="popup.js"></script>
 </body>
 
