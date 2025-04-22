@@ -447,6 +447,7 @@ class SearchQuest {
     }
 
     _quitSearchCleanUp() {
+        // Only set to DONE if searches are truly finished
         if (this._jobStatus_ == STATUS_BUSY) {
             this._jobStatus_ = STATUS_DONE;
         }
@@ -460,7 +461,8 @@ class SearchQuest {
             console.warn('Search type not initialized, defaulting to PC search');
             this._preparePCSearch();
         }
-        
+        // --- FIX: Always set jobStatus to STATUS_BUSY at the start and after each wait ---
+        this._jobStatus_ = STATUS_BUSY;
         try {
             // Check if searches are completed before continuing
             if (this._isCurrentSearchCompleted()) {
@@ -580,6 +582,8 @@ class SearchQuest {
                     // Wait for the search interval, but ensure it doesn't stall
                     try {
                         console.log(`Waiting ${waitMs}ms before next search`);
+                        // --- FIX: Keep jobStatus as STATUS_BUSY during wait ---
+                        this._jobStatus_ = STATUS_BUSY;
                         await Promise.race([
                             sleep(waitMs),
                             new Promise((resolve) => {
@@ -590,15 +594,8 @@ class SearchQuest {
                                 }, waitMs + 5000); // 5 seconds longer than intended wait
                             })
                         ]);
-                        
-                        // Double check search state is still valid
-                        if (this._jobStatus_ !== STATUS_BUSY) {
-                            console.log('Search job status changed during wait, stopping search loop');
-                            return;
-                        }
-                        
-                        // Logging to track search loop progression
-                        console.log(`Wait complete, continuing to next search (${this._currentSearchCount_}/${this._getCurrentMaxSearches()})`);
+                        // --- FIX: After wait, still STATUS_BUSY unless session is done ---
+                        this._jobStatus_ = STATUS_BUSY;
                         
                         // Continue to next search with explicit try/catch to handle errors
                         try {
@@ -1093,21 +1090,17 @@ class SearchQuest {
     // Add method to force stop search activities (for scheduling)
     async forceStop() {
         console.log('Force stopping search quest due to schedule pause');
-        
         // Store current progress before stopping
         try {
             await this._saveSearchProgress();
         } catch (error) {
             console.error('Error saving progress during force stop:', error);
         }
-        
         // Mark as done so the search loop will exit
         this._jobStatus_ = STATUS_DONE;
-        
         // Clear search type and timers to prevent further searches
         this._currentSearchType_ = null;
         this._nextSearchTime = null;
-        
         // Save pause timestamp and reason
         chrome.storage.local.set({
             'searchPausedAt': new Date().toISOString(),
@@ -1115,10 +1108,8 @@ class SearchQuest {
             'pausedSearchType': this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'pc' : 'mb',
             'searchPausedReason': 'scheduleEnd'
         });
-        
         // Set flag to indicate this was paused by schedule
         this._pausedBySchedule = true;
-        
         console.log('Search quest successfully paused');
         return true;
     }
