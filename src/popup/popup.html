@@ -3,12 +3,11 @@
 
 <head>
     <title>Options</title>
+    <link rel="stylesheet" type="text/css" href="css.css">
     <style>
         body {
             background-color: #ffffff;
             margin: 0;
-            width: 320px;
-            overflow-y: hidden; /* Prevent scrollbars */
         }
 
         div {
@@ -166,7 +165,7 @@
             height: 100%;
             background-color: #fbbc05; /* Yellow */
             border-radius: 3px;
-            transition: width 1s linear;
+            transition: width 1s ease-out; /* Smoother transition for countdown */
         }
         
         .mobile-search .progress-bar {
@@ -201,7 +200,8 @@
         .popup-container {
             display: flex;
             flex-direction: column;
-            height: 100vh;
+            height: fit-content;
+            max-height: 800px;
         }
 
         header {
@@ -393,7 +393,7 @@
             color: #333;
         }
 
-        /* Next search term and skip button */
+        /* Next search term and control buttons */
         .next-search-container {
             margin-top: 8px;
             font-size: 10px;
@@ -410,18 +410,27 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            max-width: 75%;
+            max-width: 60%;
         }
         
-        .skip-button {
-            background-color: #fbbc05;
-            color: #333;
+        .search-buttons {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .skip-button, .force-button {
             border: none;
             border-radius: 3px;
             padding: 2px 8px;
             font-size: 10px;
             cursor: pointer;
             transition: background-color 0.2s;
+            min-width: 40px;
+        }
+        
+        .skip-button {
+            background-color: #fbbc05;
+            color: #333;
         }
         
         .skip-button:hover {
@@ -432,7 +441,20 @@
             background-color: #f57f17;
         }
         
-        .skip-button:disabled {
+        .force-button {
+            background-color: #ea4335;
+            color: white;
+        }
+        
+        .force-button:hover {
+            background-color: #d23c2d;
+        }
+        
+        .force-button:active {
+            background-color: #b52d20;
+        }
+        
+        .skip-button:disabled, .force-button:disabled {
             background-color: #e0e0e0;
             color: #9e9e9e;
             cursor: not-allowed;
@@ -443,23 +465,6 @@
 <body>
     <div class="popup-container">
         <header>
-            <div class="announcement" id="update-available">
-                <div class="ms_l_s ">
-                    <a target="_blank" href="https://github.com/tmxkn1/Microsoft-Reward-Chrome-Ext/releases">
-                        <div class="mfo_c_rh fp_row align-center">
-                            <div class="b_attensionText fc_dyn">Extension Update Available</div>
-                            <div class="fc_fix20"><svg class="rw-si chevronRight" width="16" height="16" viewBox="0 0 16 16"
-                                    xmlns="http://www.w3.org/2000/svg">
-                                    <path
-                                        d="M5.707 15.707l7-7a1 1 0 0 0 0-1.414l-7-7a1 1 0 1 0-1.414 1.414l6.293 6.293-6.293 6.293a1 1 0 1 0 1.414 1.414z"
-                                        fill="#767676"></path>
-                                </svg></div>
-                        </div>
-                    </a>
-                </div>
-                <div class="separator" style="margin:0;"></div>
-            </div>
-            
             <!-- Stats Bar -->
             <!-- <div class="stats-container" id="stats-container">
                 <div class="stats-column">
@@ -488,7 +493,7 @@
             <!-- Update the iframe with better attributes for compatibility -->
             <iframe id="msr_iframe" title="Microsoft Rewards" frameborder="no" scrolling="no"
                 src="https://www.bing.com/rewardsapp/flyout?channel=0" 
-                style="display: block; width: 320px; height: 530px;">
+                style="display: block; width: 100%;">
             </iframe>
         </div>
         <div class="separator"></div>

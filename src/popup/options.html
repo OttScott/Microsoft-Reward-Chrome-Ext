@@ -123,8 +123,20 @@
                     <label for="intervalVariation">Interval variation (seconds):</label>
                     <input type="number" id="intervalVariation" min="0" max="900" />
                 </div>
+                <div class="option-row">
+                    <label for="smartSwitching" class="tooltip-bottom-left" data-tooltip="Automatically switch to mobile searches if PC searches are maxed out for the day, and vice versa">Smart switching:</label>
+                    <input type="checkbox" id="smartSwitching" checked />
+                </div>
+                <div class="option-row">
+                    <label for="interleaveSearches" class="tooltip-bottom-left" data-tooltip="Alternate between PC and mobile searches in random batches of 3-8 searches instead of doing all PC searches first">Interleave searches:</label>
+                    <input type="checkbox" id="interleaveSearches" />
+                </div>
                 <div class="info-text">
                     Each search session will perform (base &plusmn; variation) searches
+                    <br>
+                    Smart switching checks daily point limits and prioritizes accordingly
+                    <br>
+                    Interleaving performs searches in alternating random batches of 3-8
                     <br>
                     Changes take effect after clicking Save
                 </div>

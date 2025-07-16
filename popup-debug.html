@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Extension Popup Debug</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 10px; 
+            width: 300px;
+            background-color: #f0f0f0;
+        }
+        .debug-section {
+            background: white;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .status {
+            padding: 5px;
+            margin: 2px 0;
+            border-radius: 3px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .warning { background-color: #fff3cd; color: #856404; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .test-button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 3px;
+        }
+        .test-button:hover {
+            background-color: #0056b3;
+        }
+        #iframe-test {
+            width: 100%;
+            height: 200px;
+            border: 1px solid #ccc;
+            background-color: white;
+        }
+    </style>
+</head>
+<body>
+    <h3>Extension Popup Debug Tool</h3>
+    
+    <div class="debug-section">
+        <h4>Basic Tests</h4>
+        <div id="chrome-api-test" class="status">Testing Chrome APIs...</div>
+        <div id="storage-test" class="status">Testing Storage Access...</div>
+        <div id="messaging-test" class="status">Testing Background Communication...</div>
+    </div>
+    
+    <div class="debug-section">
+        <h4>Network Tests</h4>
+        <div id="network-test" class="status">Testing Network Access...</div>
+        <div id="bing-test" class="status">Testing Bing Access...</div>
+    </div>
+    
+    <div class="debug-section">
+        <h4>Interactive Tests</h4>
+        <button class="test-button" onclick="testIframe()">Test Iframe Loading</button>
+        <button class="test-button" onclick="testRewardsPage()">Test Rewards Page</button>
+        <button class="test-button" onclick="clearStorage()">Clear Extension Storage</button>
+    </div>
+    
+    <div class="debug-section">
+        <h4>Iframe Test</h4>
+        <iframe id="iframe-test" src="about:blank"></iframe>
+    </div>
+    
+    <div class="debug-section">
+        <h4>Console Output</h4>
+        <div id="console-output" style="font-family: monospace; font-size: 12px; max-height: 150px; overflow-y: auto; background-color: #f8f9fa; padding: 10px;">
+            Console messages will appear here...
+        </div>
+    </div>
+
+    <script>
+        // Redirect console.log to our output div
+        const consoleOutput = document.getElementById('console-output');
+        const originalLog = console.log;
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            const message = args.map(arg => 
+                typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+            ).join(' ');
+            consoleOutput.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        };
+
+        function setStatus(elementId, message, type = 'success') {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `status ${type}`;
+        }
+
+        async function runAllTests() {
+            console.log('Starting extension debug tests...');
+            
+            // Test Chrome APIs
+            try {
+                if (typeof chrome !== 'undefined' && chrome.runtime) {
+                    setStatus('chrome-api-test', '✅ Chrome APIs available', 'success');
+                } else {
+                    setStatus('chrome-api-test', '❌ Chrome APIs not available', 'error');
+                }
+            } catch (e) {
+                setStatus('chrome-api-test', `❌ Chrome API error: ${e.message}`, 'error');
+            }
+
+            // Test Storage
+            try {
+                if (chrome.storage && chrome.storage.local) {
+                    await chrome.storage.local.set({debugTest: 'test'});
+                    const result = await chrome.storage.local.get('debugTest');
+                    if (result.debugTest === 'test') {
+                        setStatus('storage-test', '✅ Storage working', 'success');
+                        await chrome.storage.local.remove('debugTest');
+                    } else {
+                        setStatus('storage-test', '❌ Storage read/write failed', 'error');
+                    }
+                } else {
+                    setStatus('storage-test', '❌ Storage API not available', 'error');
+                }
+            } catch (e) {
+                setStatus('storage-test', `❌ Storage error: ${e.message}`, 'error');
+            }
+
+            // Test Background Communication
+            try {
+                if (chrome.runtime && chrome.runtime.sendMessage) {
+                    chrome.runtime.sendMessage({action: 'ping'}, (response) => {
+                        if (chrome.runtime.lastError) {
+                            setStatus('messaging-test', `❌ Message error: ${chrome.runtime.lastError.message}`, 'error');
+                        } else if (response) {
+                            setStatus('messaging-test', '✅ Background communication working', 'success');
+                        } else {
+                            setStatus('messaging-test', '⚠️ No response from background', 'warning');
+                        }
+                    });
+                } else {
+                    setStatus('messaging-test', '❌ Messaging API not available', 'error');
+                }
+            } catch (e) {
+                setStatus('messaging-test', `❌ Messaging error: ${e.message}`, 'error');
+            }
+
+            // Test Network
+            try {
+                const response = await fetch('https://www.google.com/favicon.ico', {
+                    method: 'HEAD',
+                    cache: 'no-store'
+                });
+                if (response.ok) {
+                    setStatus('network-test', '✅ Network access working', 'success');
+                } else {
+                    setStatus('network-test', `⚠️ Network response: ${response.status}`, 'warning');
+                }
+            } catch (e) {
+                setStatus('network-test', `❌ Network error: ${e.message}`, 'error');
+            }
+
+            // Test Bing Access
+            try {
+                const response = await fetch('https://www.bing.com/', {
+                    method: 'HEAD',
+                    cache: 'no-store'
+                });
+                if (response.ok) {
+                    setStatus('bing-test', '✅ Bing access working', 'success');
+                } else {
+                    setStatus('bing-test', `⚠️ Bing response: ${response.status}`, 'warning');
+                }
+            } catch (e) {
+                setStatus('bing-test', `❌ Bing error: ${e.message}`, 'error');
+            }
+        }
+
+        function testIframe() {
+            const iframe = document.getElementById('iframe-test');
+            iframe.src = 'https://www.bing.com/rewardsapp/flyout?channel=0';
+            console.log('Testing iframe load to Bing Rewards...');
+            
+            iframe.onload = () => {
+                console.log('✅ Iframe loaded successfully');
+            };
+            
+            iframe.onerror = (e) => {
+                console.log('❌ Iframe failed to load:', e);
+            };
+        }
+
+        function testRewardsPage() {
+            console.log('Opening Bing Rewards page in new tab...');
+            window.open('https://www.bing.com/rewardsapp/flyout?channel=0', '_blank');
+        }
+
+        async function clearStorage() {
+            try {
+                await chrome.storage.local.clear();
+                await chrome.storage.sync.clear();
+                console.log('✅ Extension storage cleared');
+            } catch (e) {
+                console.log('❌ Failed to clear storage:', e.message);
+            }
+        }
+
+        // Run tests when page loads
+        window.addEventListener('load', () => {
+            console.log('Debug tool loaded, running tests...');
+            runAllTests();
+        });
+    </script>
+</body>
+</html>

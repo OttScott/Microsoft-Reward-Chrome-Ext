@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Microsoft Rewards Bot</title>
+    <style>
+        body {
+            background-color: #ffffff;
+            margin: 0;
+            width: 320px;
+            font-family: 'Roboto', sans-serif;
+        }
+
+        .popup-container {
+            display: flex;
+            flex-direction: column;
+            height: 580px;
+        }
+
+        header {
+            flex: 0 0 auto;
+            background-color: #f5f5f5;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 10px;
+        }
+
+        .iframe-container {
+            flex: 1 1 auto;
+            position: relative;
+        }
+
+        footer {
+            flex: 0 0 auto;
+            background-color: #f9f9f9;
+            border-top: 1px solid #e0e0e0;
+            color: #636363;
+            font-size: 11px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        footer a {
+            color: #4285f4;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        .footer-button {
+            background: none;
+            border: none;
+            color: #4285f4;
+            cursor: pointer;
+            font-size: 11px;
+            padding: 0;
+            text-decoration: underline;
+        }
+
+        .footer-button:hover {
+            color: #2a56c6;
+        }
+
+        .footer-separator {
+            margin: 0 5px;
+        }
+
+        /* Iframe styles */
+        #msr_iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+
+        /* Loading indicator */
+        .loading-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4285f4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #666;
+            font-size: 14px;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .loading-subtext {
+            color: #999;
+            font-size: 12px;
+            text-align: center;
+            max-width: 250px;
+            line-height: 1.4;
+        }
+
+        /* Error fallback */
+        .error-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #fff;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            z-index: 20;
+        }
+
+        .error-icon {
+            width: 48px;
+            height: 48px;
+            background-color: #ea4335;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+
+        .error-icon::after {
+            content: "!";
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .error-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+
+        .error-message {
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+            line-height: 1.4;
+            margin-bottom: 20px;
+        }
+
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            width: 100%;
+            max-width: 200px;
+        }
+
+        .action-button {
+            padding: 10px 16px;
+            border: 1px solid #4285f4;
+            border-radius: 4px;
+            background-color: white;
+            color: #4285f4;
+            cursor: pointer;
+            text-decoration: none;
+            text-align: center;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .action-button:hover {
+            background-color: #4285f4;
+            color: white;
+        }
+
+        .action-button.primary {
+            background-color: #4285f4;
+            color: white;
+        }
+
+        .action-button.primary:hover {
+            background-color: #3367d6;
+        }
+
+        /* Stats container */
+        .stats-container {
+            margin-bottom: 12px;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .stats-item {
+            text-align: center;
+            flex: 1;
+        }
+
+        .stats-label {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 2px;
+            text-transform: uppercase;
+        }
+
+        .stats-value {
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .connection-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        .connected {
+            background-color: #0f9d58;
+        }
+
+        .disconnected {
+            background-color: #ea4335;
+        }
+
+        .warning {
+            background-color: #fbbc05;
+        }
+
+        /* Search progress indicator */
+        .search-progress-container {
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 8px;
+        }
+
+        .search-type {
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background-color: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 4px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: #4285f4;
+            transition: width 0.3s;
+        }
+
+        .mobile .progress-fill {
+            background-color: #0f9d58;
+        }
+
+        .progress-text {
+            font-size: 10px;
+            color: #666;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="popup-container">
+        <header>
+            <div class="stats-container" id="stats-container">
+                <div class="stats-row">
+                    <div class="stats-item">
+                        <div class="stats-label">Today's Points</div>
+                        <div class="stats-value" id="today-earnings">--</div>
+                    </div>
+                    <div class="stats-item">
+                        <div class="stats-label">Remaining</div>
+                        <div class="stats-value" id="remaining-points">--</div>
+                    </div>
+                    <div class="stats-item">
+                        <div class="stats-label">Status</div>
+                        <div class="stats-value" id="search-status">Loading...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Search progress will be inserted here -->
+            <div id="search-progress-area"></div>
+        </header>
+
+        <div class="iframe-container">
+            <!-- Loading indicator -->
+            <div class="loading-container" id="loading-container">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Loading Microsoft Rewards...</div>
+                <div class="loading-subtext">Connecting to rewards.bing.com</div>
+            </div>
+
+            <!-- Error fallback -->
+            <div class="error-container" id="error-container">
+                <div class="error-icon"></div>
+                <div class="error-title">Unable to Load Rewards</div>
+                <div class="error-message">
+                    The Microsoft Rewards page could not be loaded. This might be due to network restrictions or temporary issues.
+                </div>
+                <div class="action-buttons">
+                    <a href="#" class="action-button primary" id="open-rewards-tab">
+                        Open Rewards in New Tab
+                    </a>
+                    <button class="action-button" id="retry-loading">
+                        Retry Loading
+                    </button>
+                    <button class="action-button" id="show-debug-info">
+                        Debug Information
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main iframe -->
+            <iframe id="msr_iframe" 
+                    title="Microsoft Rewards" 
+                    src="https://www.bing.com/rewardsapp/flyout?channel=0"
+                    style="display: none;">
+            </iframe>
+        </div>
+
+        <footer>
+            <div>
+                <span id="connection-status" class="connection-status connected" title="Connection status"></span>
+                <span>&copy; 2025 tmxkn1 - </span>
+                <a target="_blank" href="options.html">Options</a>
+                <span class="footer-separator">|</span>
+                <button id="reset-counters" class="footer-button">Reset Counters</button>
+                <span class="footer-separator">|</span>
+                <a target="_blank" href="https://github.com/tmxkn1/Microsoft-Reward-Chrome-Ext">GitHub</a>
+            </div>
+        </footer>
+    </div>
+
+    <script src="iframe-helper.js"></script>
+    <script>
+        'use strict';
+
+        // Track loading state
+        let iframeLoadAttempts = 0;
+        const MAX_LOAD_ATTEMPTS = 3;
+        const IFRAME_LOAD_TIMEOUT = 15000; // 15 seconds
+
+        let loadingTimeout;
+        let statsUpdateInterval;
+        let searchProgressInterval;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Popup debug version loaded');
+            
+            // Initialize UI
+            initializeUI();
+            
+            // Start loading iframe with timeout
+            loadIframeWithTimeout();
+            
+            // Request initial data
+            requestInitialData();
+            
+            // Set up periodic updates
+            setupPeriodicUpdates();
+            
+            // Set up event listeners
+            setupEventListeners();
+        });
+
+        function initializeUI() {
+            updateConnectionStatus();
+            
+            // Show loading state
+            document.getElementById('loading-container').style.display = 'flex';
+            document.getElementById('error-container').style.display = 'none';
+            document.getElementById('msr_iframe').style.display = 'none';
+        }
+
+        function loadIframeWithTimeout() {
+            const iframe = document.getElementById('msr_iframe');
+            const loadingContainer = document.getElementById('loading-container');
+            const errorContainer = document.getElementById('error-container');
+            
+            iframeLoadAttempts++;
+            console.log(`Iframe load attempt ${iframeLoadAttempts}/${MAX_LOAD_ATTEMPTS}`);
+            
+            // Clear any existing timeout
+            if (loadingTimeout) {
+                clearTimeout(loadingTimeout);
+            }
+            
+            // Set up load success handler
+            const onLoad = () => {
+                console.log('Iframe loaded successfully');
+                clearTimeout(loadingTimeout);
+                loadingContainer.style.display = 'none';
+                errorContainer.style.display = 'none';
+                iframe.style.display = 'block';
+            };
+            
+            // Set up load failure handler
+            const onError = () => {
+                console.log('Iframe failed to load');
+                handleIframeFailure();
+            };
+            
+            // Set up timeout handler
+            loadingTimeout = setTimeout(() => {
+                console.log('Iframe load timeout');
+                handleIframeFailure();
+            }, IFRAME_LOAD_TIMEOUT);
+            
+            // Add event listeners
+            iframe.onload = onLoad;
+            iframe.onerror = onError;
+            
+            // Force reload the iframe
+            iframe.src = iframe.src;
+        }
+
+        function handleIframeFailure() {
+            const loadingContainer = document.getElementById('loading-container');
+            const errorContainer = document.getElementById('error-container');
+            const iframe = document.getElementById('msr_iframe');
+            
+            if (iframeLoadAttempts < MAX_LOAD_ATTEMPTS) {
+                console.log('Retrying iframe load...');
+                setTimeout(() => {
+                    loadIframeWithTimeout();
+                }, 2000);
+                return;
+            }
+            
+            console.log('Max iframe load attempts reached, showing error');
+            loadingContainer.style.display = 'none';
+            iframe.style.display = 'none';
+            errorContainer.style.display = 'flex';
+        }
+
+        function requestInitialData() {
+            // Request rewards data
+            chrome.runtime.sendMessage({
+                action: 'getRewardsData'
+            }, response => {
+                if (response && response.success) {
+                    updateStatsDisplay(response);
+                } else {
+                    console.warn('Failed to get rewards data:', response);
+                }
+            });
+            
+            // Request search progress
+            chrome.runtime.sendMessage({
+                action: 'getSearchProgress'
+            }, response => {
+                if (response && response.success) {
+                    updateSearchProgress(response);
+                } else {
+                    console.warn('Failed to get search progress:', response);
+                }
+            });
+        }
+
+        function setupPeriodicUpdates() {
+            // Update stats every 30 seconds
+            statsUpdateInterval = setInterval(() => {
+                requestInitialData();
+            }, 30000);
+            
+            // Update search progress every 5 seconds
+            searchProgressInterval = setInterval(() => {
+                chrome.runtime.sendMessage({
+                    action: 'getSearchProgress'
+                }, response => {
+                    if (response && response.success) {
+                        updateSearchProgress(response);
+                    }
+                });
+            }, 5000);
+        }
+
+        function setupEventListeners() {
+            // Retry loading button
+            document.getElementById('retry-loading').addEventListener('click', () => {
+                iframeLoadAttempts = 0;
+                initializeUI();
+                loadIframeWithTimeout();
+            });
+            
+            // Open rewards in new tab
+            document.getElementById('open-rewards-tab').addEventListener('click', (e) => {
+                e.preventDefault();
+                chrome.tabs.create({ url: 'https://rewards.bing.com/' });
+            });
+            
+            // Debug info button
+            document.getElementById('show-debug-info').addEventListener('click', () => {
+                showDebugInfo();
+            });
+            
+            // Reset counters button
+            document.getElementById('reset-counters').addEventListener('click', () => {
+                resetCounters();
+            });
+        }
+
+        function updateStatsDisplay(response) {
+            console.log('Updating stats display:', response);
+            
+            if (!response || !response.success || !response.data) {
+                return;
+            }
+            
+            const data = response.data;
+            
+            // Update points
+            const todayEarnings = document.getElementById('today-earnings');
+            if (todayEarnings) {
+                todayEarnings.textContent = data.earnedToday !== undefined ? data.earnedToday : '--';
+            }
+            
+            const remainingPoints = document.getElementById('remaining-points');
+            if (remainingPoints) {
+                remainingPoints.textContent = data.remainingPoints !== undefined ? data.remainingPoints : '--';
+            }
+        }
+
+        function updateSearchProgress(response) {
+            console.log('Updating search progress:', response);
+            
+            if (!response || !response.success) {
+                return;
+            }
+            
+            const statusElement = document.getElementById('search-status');
+            const progressArea = document.getElementById('search-progress-area');
+            
+            if (response.isInProgress) {
+                statusElement.textContent = 'In Progress';
+                statusElement.style.color = '#0f9d58';
+                
+                // Show detailed progress
+                if (response.currentSearchType && response.progress) {
+                    const progress = response.progress;
+                    progressArea.innerHTML = `
+                        <div class="search-progress-container ${response.currentSearchType.toLowerCase()}">
+                            <div class="search-type">${response.currentSearchType.toUpperCase()} Search</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${(progress.completed / progress.total * 100).toFixed(1)}%"></div>
+                            </div>
+                            <div class="progress-text">${progress.completed}/${progress.total} completed</div>
+                        </div>
+                    `;
+                }
+            } else {
+                statusElement.textContent = 'Idle';
+                statusElement.style.color = '#666';
+                progressArea.innerHTML = '';
+            }
+        }
+
+        function updateConnectionStatus() {
+            const statusElement = document.getElementById('connection-status');
+            
+            // Test connection
+            fetch('https://www.google.com/favicon.ico', { 
+                method: 'HEAD', 
+                cache: 'no-store' 
+            })
+            .then(response => {
+                if (response.ok) {
+                    statusElement.className = 'connection-status connected';
+                    statusElement.title = 'Connected';
+                } else {
+                    statusElement.className = 'connection-status warning';
+                    statusElement.title = 'Connection issues';
+                }
+            })
+            .catch(() => {
+                statusElement.className = 'connection-status disconnected';
+                statusElement.title = 'Disconnected';
+            });
+        }
+
+        function showDebugInfo() {
+            chrome.tabs.create({ url: chrome.runtime.getURL('../popup-debug.html') });
+        }
+
+        function resetCounters() {
+            chrome.runtime.sendMessage({
+                action: 'resetCounters'
+            }, response => {
+                if (response && response.success) {
+                    console.log('Counters reset successfully');
+                    // Refresh data
+                    requestInitialData();
+                } else {
+                    console.error('Failed to reset counters:', response);
+                }
+            });
+        }
+
+        // Cleanup on unload
+        window.addEventListener('beforeunload', () => {
+            if (loadingTimeout) clearTimeout(loadingTimeout);
+            if (statsUpdateInterval) clearInterval(statsUpdateInterval);
+            if (searchProgressInterval) clearInterval(searchProgressInterval);
+        });
+    </script>
+</body>
+</html>

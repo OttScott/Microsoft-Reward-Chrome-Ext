@@ -36,7 +36,9 @@ function saveOptions() {
         searchVariation: parseInt(document.getElementById('searchVariation').value) || 5,
         disableMobile: document.getElementById('disableMobile').checked,
         baseSearchInterval: document.getElementById('baseSearchInterval').value,
-        intervalVariation: document.getElementById('intervalVariation').value
+        intervalVariation: document.getElementById('intervalVariation').value,
+        smartSwitching: document.getElementById('smartSwitching').checked,
+        interleaveSearches: document.getElementById('interleaveSearches').checked
     };
 
     chrome.storage.sync.set(options, () => {
@@ -44,7 +46,9 @@ function saveOptions() {
             action: 'updateSearchSettings',
             content: {
                 baseSearchCount: options.baseSearchCount,
-                searchVariation: options.searchVariation
+                searchVariation: options.searchVariation,
+                smartSwitching: options.smartSwitching,
+                interleaveSearches: options.interleaveSearches
             }
         }, () => {
             const status = document.getElementById('status');
@@ -68,7 +72,9 @@ function restoreOptions() {
         searchVariation: 5,
         disableMobile: false,
         baseSearchInterval: 15,  // 15 minutes default
-        intervalVariation: 300   // 5 minutes (300 seconds) variation
+        intervalVariation: 300,   // 5 minutes (300 seconds) variation
+        smartSwitching: true,    // Default to smart switching enabled
+        interleaveSearches: false // Default to traditional sequential searches
     }, function (options) {
         getElementCountdownAlgorithm().checked = options.compatibilityMode;
         getElementPcUaOverrideEnable().checked = options.pcUaOverrideEnable;
@@ -83,6 +89,8 @@ function restoreOptions() {
         document.getElementById('disableMobile').checked = options.disableMobile;
         document.getElementById('baseSearchInterval').value = options.baseSearchInterval;
         document.getElementById('intervalVariation').value = options.intervalVariation;
+        document.getElementById('smartSwitching').checked = options.smartSwitching;
+        document.getElementById('interleaveSearches').checked = options.interleaveSearches;
     });
 }
 
@@ -108,5 +116,20 @@ getElementPcUaOverrideEnable().addEventListener('click', saveOptions);
 getElementMbUaOverrideEnable().addEventListener('click', saveOptions);
 getElementPcUaOverrideValue().addEventListener('change', saveOptions);
 getElementMbUaOverrideValue().addEventListener('change', saveOptions);
+
+// Add mutual exclusivity logic for search strategies
+document.getElementById('smartSwitching').addEventListener('change', function() {
+    if (this.checked) {
+        document.getElementById('interleaveSearches').checked = false;
+    }
+    saveOptions();
+});
+
+document.getElementById('interleaveSearches').addEventListener('change', function() {
+    if (this.checked) {
+        document.getElementById('smartSwitching').checked = false;
+    }
+    saveOptions();
+});
 
 document.getElementById('version-number').innerText = 'V' + chrome.runtime.getManifest().version;

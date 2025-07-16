@@ -429,99 +429,33 @@ async function loadFallbackUserAgents() {
 }
 
 async function getStableUA() {
-    debugLog('Fetching stable user agents...', LOG_LEVELS.DEBUG);
-    const controller = new AbortController();
-    const signal = controller.signal;
-    const url = 'https://raw.githubusercontent.com/tmxkn1/Microsoft-Reward-Chrome-Ext/master/useragents.json';
+    debugLog('External UA fetching disabled - using local fallbacks', LOG_LEVELS.DEBUG);
     
+    // External fetching disabled - use local fallbacks instead
     try {
-        const fetchProm = fetch(url, {method: 'GET', signal: signal});
-        setTimeout(() => controller.abort(), 3000);
-
-        const response = await fetchProm;
-        debugLog('Stable UA fetch response:', LOG_LEVELS.DEBUG, response.status, response.statusText);
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            debugLog('Stable UA fetch failed:', LOG_LEVELS.ERROR, errorText);
-            throw new Error(errorText);
-        }
-
-        const text = await response.text();
-        const ua = JSON.parse(text);
-        userAgents = {
-            'pc': ua.stable.edge_win,
-            'mb': ua.stable.chrome_ios,
-            'pcSource': 'stable',
-            'mbSource': 'stable',
-        };
-    } catch (ex) {
-        debugLog('Stable UA fetch error:', LOG_LEVELS.ERROR, {
-            name: ex.name,
-            message: ex.message,
-            stack: ex.stack
-        });
-        
-        // First try to load fallbacks before giving up
-        try {
-            await loadFallbackUserAgents();
-            return;
-        } catch (fallbackError) {
-            debugLog('Failed to load fallbacks after stable UA fetch failed', LOG_LEVELS.ERROR);
-        }
-        
-        if (ex.name === 'AbortError') {
-            throw new FetchFailedException('getStableUA', ex, 'Fetch timed out. Failed to update user agents. Perhaps, Github server is offline.');
-        }
-        throw new FetchFailedException('getStableUA', ex);
+        await loadFallbackUserAgents();
+        return;
+    } catch (fallbackError) {
+        debugLog('Failed to load fallback user agents', LOG_LEVELS.ERROR);
+        throw new FetchFailedException('getStableUA', fallbackError, 'Failed to load local fallback user agents');
     }
 }
 
 async function getUpdatedUA(type='both') {
-    debugLog('Fetching updated user agents for type:', LOG_LEVELS.DEBUG, type);
-    const controller = new AbortController();
-    const signal = controller.signal;
-    const url = 'https://raw.githubusercontent.com/tmxkn1/UpdatedUserAgents/master/useragents.json';
+    debugLog('External UA updating disabled - using existing user agents', LOG_LEVELS.DEBUG, type);
     
+    // External UA fetching disabled - just use existing user agents or fallbacks
     try {
-        const fetchProm = fetch(url, {method: 'GET', signal: signal});
-        setTimeout(() => controller.abort(), 3000);
-
-        const response = await fetchProm;
-        debugLog('Updated UA fetch response:', LOG_LEVELS.DEBUG, response.status, response.statusText);
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            debugLog('Updated UA fetch failed:', LOG_LEVELS.ERROR, errorText);
-            throw new Error(errorText);
-        }
-
-        const text = await response.text();
-        const ua = JSON.parse(text);
-        if (type == 'both') {
-            userAgents.pc = ua.edge.windows;
-            userAgents.mb = ua.chrome.ios;
-            userAgents.pcSource = 'updated';
-            userAgents.mbSource = 'updated';
-        } else if (type == 'pc') {
-            userAgents.pc = ua.edge.windows;
-            userAgents.pcSource = 'updated';
-        } else if (type == 'mb') {
-            userAgents.mb = ua.chrome.ios;
-            userAgents.mbSource = 'updated';
+        if (!userAgents || !userAgents.pc || !userAgents.mb) {
+            debugLog('No existing user agents, loading fallbacks', LOG_LEVELS.DEBUG);
+            await loadFallbackUserAgents();
+        } else {
+            debugLog('Using existing user agents', LOG_LEVELS.DEBUG);
         }
         assertUA();
     } catch (ex) {
-        debugLog('Updated UA fetch error:', LOG_LEVELS.ERROR, {
-            name: ex.name,
-            message: ex.message,
-            stack: ex.stack
-        });
-        
-        if (ex.name === 'AbortError') {
-            throw new FetchFailedException('getUpdatedUA', ex, 'Fetch timed out. Failed to update user agents. Do you have internet connection? Otherwise, perhaps Github server is down.');
-        }
-        throw new FetchFailedException('getUpdatedUA', ex);
+        debugLog('Error in getUpdatedUA fallback:', LOG_LEVELS.ERROR, ex);
+        throw new FetchFailedException('getUpdatedUA', ex, 'Failed to use local user agents');
     }
 }
 

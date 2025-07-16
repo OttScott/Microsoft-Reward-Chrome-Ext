@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Microsoft Rewards Bot - Fallback</title>
+    <style>
+        body {
+            background-color: #ffffff;
+            margin: 0;
+            width: 320px;
+            font-family: 'Roboto', sans-serif;
+            padding: 16px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .logo {
+            font-size: 18px;
+            font-weight: bold;
+            color: #4285f4;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .stats-section {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .stats-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 8px;
+            background-color: white;
+            border-radius: 4px;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .search-section {
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .search-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .search-status {
+            text-align: center;
+            padding: 12px;
+            background-color: white;
+            border-radius: 4px;
+            margin-bottom: 12px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        .status-active {
+            background-color: #0f9d58;
+        }
+
+        .status-idle {
+            background-color: #666;
+        }
+
+        .search-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .control-button {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #4285f4;
+            border-radius: 4px;
+            background-color: white;
+            color: #4285f4;
+            cursor: pointer;
+            font-size: 12px;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .control-button:hover {
+            background-color: #4285f4;
+            color: white;
+        }
+
+        .control-button.primary {
+            background-color: #4285f4;
+            color: white;
+        }
+
+        .control-button.primary:hover {
+            background-color: #3367d6;
+        }
+
+        .links-section {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .links-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .link-item {
+            display: block;
+            padding: 10px;
+            margin-bottom: 8px;
+            background-color: white;
+            border-radius: 4px;
+            text-decoration: none;
+            color: #333;
+            border-left: 4px solid #4285f4;
+            transition: all 0.2s;
+        }
+
+        .link-item:hover {
+            background-color: #f0f0f0;
+            transform: translateX(2px);
+        }
+
+        .link-title {
+            font-weight: bold;
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+
+        .link-description {
+            font-size: 10px;
+            color: #666;
+        }
+
+        .footer {
+            text-align: center;
+            font-size: 11px;
+            color: #666;
+            border-top: 1px solid #e0e0e0;
+            padding-top: 15px;
+        }
+
+        .footer a {
+            color: #4285f4;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        .debug-info {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 11px;
+        }
+
+        .debug-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .connection-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+
+        .connected {
+            background-color: #0f9d58;
+        }
+
+        .disconnected {
+            background-color: #ea4335;
+        }
+
+        .warning {
+            background-color: #fbbc05;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">Microsoft Rewards Bot</div>
+        <div class="subtitle">Fallback Mode - Direct Controls</div>
+    </div>
+
+    <div class="debug-info">
+        <div class="debug-title">⚠️ Fallback Mode Active</div>
+        <div>The main popup interface is not loading properly. This simplified interface provides basic controls and information.</div>
+    </div>
+
+    <div class="stats-section">
+        <div class="stats-title">Today's Progress</div>
+        <div class="stats-grid">
+            <div class="stat-item">
+                <div class="stat-label">Points Earned</div>
+                <div class="stat-value" id="today-earnings">--</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Remaining</div>
+                <div class="stat-value" id="remaining-points">--</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="search-section">
+        <div class="search-title">Search Status</div>
+        <div class="search-status">
+            <span id="status-indicator" class="status-indicator status-idle"></span>
+            <span id="search-status-text">Loading...</span>
+        </div>
+        <div class="search-controls">
+            <button class="control-button primary" id="start-searches">Start Searches</button>
+            <button class="control-button" id="stop-searches">Stop Searches</button>
+        </div>
+    </div>
+
+    <div class="links-section">
+        <div class="links-title">Quick Actions</div>
+        
+        <a href="#" class="link-item" id="open-rewards">
+            <div class="link-title">🎁 Microsoft Rewards</div>
+            <div class="link-description">Open your rewards dashboard</div>
+        </a>
+        
+        <a href="#" class="link-item" id="open-bing">
+            <div class="link-title">🔍 Bing Search</div>
+            <div class="link-description">Perform manual searches</div>
+        </a>
+        
+        <a href="#" class="link-item" id="debug-popup">
+            <div class="link-title">🛠️ Debug Tools</div>
+            <div class="link-description">Diagnose extension issues</div>
+        </a>
+        
+        <a href="options.html" class="link-item" target="_blank">
+            <div class="link-title">⚙️ Extension Options</div>
+            <div class="link-description">Configure extension settings</div>
+        </a>
+    </div>
+
+    <div class="footer">
+        <span id="connection-status" class="connection-status connected" title="Connection status"></span>
+        <span>&copy; 2025 tmxkn1 - </span>
+        <a href="#" id="reset-counters">Reset Counters</a>
+        <span> | </span>
+        <a href="https://github.com/tmxkn1/Microsoft-Reward-Chrome-Ext" target="_blank">GitHub</a>
+        <span> | </span>
+        <a href="#" id="restore-popup">Restore Main Popup</a>
+    </div>
+
+    <script>
+        'use strict';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Fallback popup loaded');
+            
+            // Initialize UI
+            updateConnectionStatus();
+            requestInitialData();
+            
+            // Set up periodic updates
+            setInterval(requestInitialData, 10000);
+            setInterval(updateConnectionStatus, 30000);
+            
+            // Set up event listeners
+            setupEventListeners();
+        });
+
+        function setupEventListeners() {
+            // Start searches
+            document.getElementById('start-searches').addEventListener('click', () => {
+                chrome.runtime.sendMessage({
+                    action: 'startSearchQuests'
+                }, response => {
+                    console.log('Start searches response:', response);
+                    updateSearchStatus('Starting searches...');
+                    setTimeout(requestInitialData, 1000);
+                });
+            });
+            
+            // Stop searches  
+            document.getElementById('stop-searches').addEventListener('click', () => {
+                chrome.runtime.sendMessage({
+                    action: 'stopSearchQuests'
+                }, response => {
+                    console.log('Stop searches response:', response);
+                    updateSearchStatus('Stopping searches...');
+                    setTimeout(requestInitialData, 1000);
+                });
+            });
+            
+            // Open rewards
+            document.getElementById('open-rewards').addEventListener('click', (e) => {
+                e.preventDefault();
+                chrome.tabs.create({ url: 'https://rewards.bing.com/' });
+            });
+            
+            // Open Bing
+            document.getElementById('open-bing').addEventListener('click', (e) => {
+                e.preventDefault();
+                chrome.tabs.create({ url: 'https://www.bing.com/' });
+            });
+            
+            // Debug popup
+            document.getElementById('debug-popup').addEventListener('click', (e) => {
+                e.preventDefault();
+                chrome.tabs.create({ url: chrome.runtime.getURL('../popup-debug.html') });
+            });
+            
+            // Reset counters
+            document.getElementById('reset-counters').addEventListener('click', (e) => {
+                e.preventDefault();
+                chrome.runtime.sendMessage({
+                    action: 'resetCounters'
+                }, response => {
+                    console.log('Reset counters response:', response);
+                    setTimeout(requestInitialData, 1000);
+                });
+            });
+            
+            // Restore main popup
+            document.getElementById('restore-popup').addEventListener('click', (e) => {
+                e.preventDefault();
+                // This would require changing the manifest action.default_popup
+                alert('To restore the main popup, edit manifest.json and change the default_popup back to "popup/popup.html"');
+            });
+        }
+
+        function requestInitialData() {
+            // Request rewards data
+            chrome.runtime.sendMessage({
+                action: 'getRewardsData'
+            }, response => {
+                if (response && response.success) {
+                    updateStatsDisplay(response);
+                } else {
+                    console.warn('Failed to get rewards data:', response);
+                }
+            });
+            
+            // Request search progress
+            chrome.runtime.sendMessage({
+                action: 'getSearchProgress'
+            }, response => {
+                if (response && response.success) {
+                    updateSearchProgressDisplay(response);
+                } else {
+                    console.warn('Failed to get search progress:', response);
+                    updateSearchStatus('Unable to get status');
+                }
+            });
+        }
+
+        function updateStatsDisplay(response) {
+            console.log('Updating stats:', response);
+            
+            if (!response || !response.success || !response.data) {
+                return;
+            }
+            
+            const data = response.data;
+            
+            const todayEarnings = document.getElementById('today-earnings');
+            if (todayEarnings) {
+                todayEarnings.textContent = data.earnedToday !== undefined ? data.earnedToday : '--';
+            }
+            
+            const remainingPoints = document.getElementById('remaining-points');
+            if (remainingPoints) {
+                remainingPoints.textContent = data.remainingPoints !== undefined ? data.remainingPoints : '--';
+            }
+        }
+
+        function updateSearchProgressDisplay(response) {
+            console.log('Updating search progress:', response);
+            
+            if (!response || !response.success) {
+                updateSearchStatus('Status unavailable');
+                return;
+            }
+            
+            const indicator = document.getElementById('status-indicator');
+            
+            if (response.isInProgress) {
+                indicator.className = 'status-indicator status-active';
+                
+                if (response.currentSearchType && response.progress) {
+                    const progress = response.progress;
+                    updateSearchStatus(`${response.currentSearchType} - ${progress.completed}/${progress.total}`);
+                } else {
+                    updateSearchStatus('Searches in progress');
+                }
+            } else {
+                indicator.className = 'status-indicator status-idle';
+                updateSearchStatus('Idle - Ready to start');
+            }
+        }
+
+        function updateSearchStatus(text) {
+            const statusText = document.getElementById('search-status-text');
+            if (statusText) {
+                statusText.textContent = text;
+            }
+        }
+
+        function updateConnectionStatus() {
+            const statusElement = document.getElementById('connection-status');
+            
+            fetch('https://www.google.com/favicon.ico', { 
+                method: 'HEAD', 
+                cache: 'no-store' 
+            })
+            .then(response => {
+                if (response.ok) {
+                    statusElement.className = 'connection-status connected';
+                    statusElement.title = 'Connected';
+                } else {
+                    statusElement.className = 'connection-status warning';
+                    statusElement.title = 'Connection issues';
+                }
+            })
+            .catch(() => {
+                statusElement.className = 'connection-status disconnected';
+                statusElement.title = 'Disconnected';
+            });
+        }
+    </script>
+</body>
+</html>

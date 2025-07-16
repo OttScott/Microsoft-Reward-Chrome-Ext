@@ -1,6 +1,9 @@
 'use strict';
 
-const MANIFEST_URL = 'https://raw.githubusercontent.com/tmxkn1/Microsoft-Reward-Chrome-Ext/master/src/manifest.json';
+// Track last countdown progress to prevent jumping
+let lastCountdownProgress = null;
+// Track last search key to detect when a new search starts
+let lastSearchTrackingKey = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     // Force immediate background refresh on popup open to get fresh data
@@ -24,6 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Set up periodic refresh for rewards data (every 30 seconds)
     setInterval(requestRewardsData, 30000);
+    
+    // Set up client-side countdown timer for active searches
+    setInterval(updateClientSideCountdown, 1000);
     
     // Adjust popup size to fit content
     adjustPopupSize();
@@ -197,7 +203,8 @@ function adjustPopupSize() {
 function requestSearchProgress() {
     // Add debounce mechanism to prevent excessive calls
     if (requestSearchProgress.inProgress) {
-        return;
+        // Return a resolved Promise instead of undefined
+        return Promise.resolve(null);
     }
     
     requestSearchProgress.inProgress = true;
@@ -245,6 +252,11 @@ requestSearchProgress.inProgress = false;
 
 // Update the updateSearchStatus function to be more resilient
 function updateSearchStatus(response) {
+    updateSearchStatusImmediate(response);
+}
+
+// Add immediate update function for real-time progress updates
+function updateSearchStatusImmediate(response) {
     try {
         if (!response) {
             console.warn('No response data for search status update');
@@ -252,11 +264,31 @@ function updateSearchStatus(response) {
         }
 
         if (response.inProgress) {
+            // Reset countdown progress tracking when starting a new search or if it's a different search
+            if (!lastSearchStatus || 
+                lastSearchStatus.current !== response.current ||
+                lastSearchStatus.type !== response.type) {
+                lastCountdownProgress = null;
+                console.log('Reset countdown progress tracking for new search');
+            }
+            
+            // Store the search status for client-side countdown
+            lastSearchStatus = {
+                ...response,
+                lastUpdateTime: new Date(),
+                searchInterval: response.searchInterval || response.totalIntervalMs || 900000 // 15 min default
+            };
+            
             const timeRemainingSeconds = Math.floor(response.timeRemaining / 1000);
             const minutesRemaining = Math.floor(timeRemainingSeconds / 60);
             const secondsRemaining = timeRemainingSeconds % 60;
             const timeFormatted = `${minutesRemaining}:${secondsRemaining.toString().padStart(2, '0')}`;
-            const percentComplete = response.percentComplete || 0;
+            const percentComplete = Math.max(0, Math.min(100, response.percentComplete || 0));
+            
+            // Add debugging for progress calculation issues
+            if (response.percentComplete > 100 || response.percentComplete < 0 || isNaN(response.percentComplete)) {
+                console.warn('Invalid percentComplete from server:', response.percentComplete, 'using clamped value:', percentComplete);
+            }
             
             // Calculate overall search completion percentage
             const overallProgressPercent = Math.floor((response.current / response.total) * 100);
@@ -275,8 +307,54 @@ function updateSearchStatus(response) {
                 }
             }
             
-            // Calculate countdown progress - inverse of percentComplete
-            const countdownProgress = 100 - percentComplete;
+            // Calculate countdown progress - inverse of percentComplete with enhanced validation
+            let countdownProgress = 100; // Default to full countdown if no valid data
+            
+            if (response.percentComplete !== undefined && response.percentComplete !== null) {
+                // percentComplete from server represents elapsed time (0-100%)
+                // countdownProgress should show remaining time, so invert it
+                const serverProgress = Math.max(0, Math.min(100, response.percentComplete || 0));
+                countdownProgress = 100 - serverProgress;
+            } else {
+                console.warn('No percentComplete received from server, using fallback calculation');
+                // Fallback calculation using time remaining
+                if (response.timeRemaining && response.searchInterval) {
+                    const remainingRatio = Math.max(0, Math.min(1, response.timeRemaining / response.searchInterval));
+                    countdownProgress = Math.floor(remainingRatio * 100);
+                }
+            }
+            
+            // Validate the calculated progress
+            if (isNaN(countdownProgress) || !isFinite(countdownProgress)) {
+                console.warn('Invalid countdown progress calculated, using fallback:', countdownProgress);
+                countdownProgress = lastCountdownProgress || 100;
+            }
+            
+            // Reset countdown tracking when starting a new search
+            const currentSearchKey = `${response.type}-${response.current}`;
+            if (lastSearchTrackingKey !== currentSearchKey) {
+                lastCountdownProgress = null; // Reset for new search
+                lastSearchTrackingKey = currentSearchKey;
+                console.log('New search detected in popup, reset countdown tracking:', currentSearchKey);
+            }
+            
+            // Prevent progress bar from jumping backwards within the same search
+            if (lastCountdownProgress !== null && countdownProgress < lastCountdownProgress) {
+                // Allow some tolerance for calculation differences (3% margin)
+                if (lastCountdownProgress - countdownProgress > 3) {
+                    console.log('Countdown progress jumped backwards, smoothing:', 
+                        `calculated: ${countdownProgress}%, last: ${lastCountdownProgress}%, using: ${lastCountdownProgress}%`,
+                        'serverPercent:', response.percentComplete, 'timeRemaining:', Math.floor((response.timeRemaining || 0)/1000) + 's'
+                    );
+                    countdownProgress = lastCountdownProgress;
+                } else {
+                    // Small jump is acceptable, might be due to rounding
+                    lastCountdownProgress = countdownProgress;
+                }
+            } else {
+                // Progress moved forward or stayed same - update tracking
+                lastCountdownProgress = countdownProgress;
+            }
             
             statusElement.innerHTML = `
                 <div class="status-banner ${response.type === 'PC' ? 'pc-search' : 'mobile-search'}">
@@ -306,7 +384,10 @@ function updateSearchStatus(response) {
                     ${response.nextSearchTerm ? `
                         <div class="next-search-container">
                             <div class="next-search-term">Next: "${response.nextSearchTerm}"</div>
-                            <button id="skip-search-button" class="skip-button">Skip</button>
+                            <div class="search-buttons">
+                                <button id="skip-search-button" class="skip-button">Skip</button>
+                                <button id="force-search-button" class="force-button">Next</button>
+                            </div>
                         </div>
                     ` : ''}
                 </div>`;
@@ -314,7 +395,7 @@ function updateSearchStatus(response) {
             // Ensure element is visible
             statusElement.style.display = 'block';
             
-            // Add click handler for the skip button
+            // Add click handlers for the search control buttons
             const skipButton = document.getElementById('skip-search-button');
             if (skipButton) {
                 // Remove any existing listeners first
@@ -322,7 +403,20 @@ function updateSearchStatus(response) {
                 skipButton.parentNode.replaceChild(newSkipButton, skipButton);
                 newSkipButton.addEventListener('click', skipCurrentSearch);
             }
+            
+            const forceButton = document.getElementById('force-search-button');
+            if (forceButton) {
+                // Remove any existing listeners first
+                const newForceButton = forceButton.cloneNode(true);
+                forceButton.parentNode.replaceChild(newForceButton, forceButton);
+                newForceButton.addEventListener('click', forceNextSearch);
+            }
         } else {
+            // Clear the last search status when not in progress
+            lastSearchStatus = null;
+            // Reset countdown progress tracking
+            lastCountdownProgress = null;
+            
             // Show next scheduled run instead
             let statusElement = document.getElementById('search-status');
             if (!statusElement) {
@@ -376,20 +470,31 @@ function skipCurrentSearch() {
     });
 }
 
-function checkUpdate() {
-    fetch(MANIFEST_URL, {method: 'GET'}).then((response) => {
-        if (response.ok) {
-            return response.json();
+// Add function to handle force search button clicks
+function forceNextSearch() {
+    console.log('Force search button clicked');
+    
+    // Disable the button while processing
+    const forceButton = document.getElementById('force-search-button');
+    if (forceButton) {
+        forceButton.disabled = true;
+        forceButton.textContent = 'Starting...';
+    }
+    
+    // Send force request to background script
+    chrome.runtime.sendMessage({
+        action: 'forceNextSearch'
+    }, response => {
+        console.log('Force response:', response);
+        
+        // Re-enable the button
+        if (forceButton) {
+            forceButton.disabled = false;
+            forceButton.textContent = 'Next';
         }
-        throw new Error('Fetch failed.');
-    }).then((manifest) => {
-        const currentVersion = chrome.runtime.getManifest().version;
-        const latestVersion = manifest.version;
-        if (currentVersion !== latestVersion) {
-            document.getElementById('update-available').style.display = 'block';
-        } else {
-            document.getElementById('update-available').style.display = 'none';
-        }
+        
+        // Request fresh search progress after a short delay
+        setTimeout(requestSearchProgress, 500);
     });
 }
 
@@ -436,8 +541,6 @@ function updateConnectivityStatus() {
     });
 }
 
-checkUpdate();
-
 // Listen for search progress updates from the background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || !message.action) return false;
@@ -449,6 +552,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // Also immediately update stats when a search is completed
                 requestRewardsData();
             });
+            break;
+            
+        case 'searchStarting':
+            // Handle immediate search starting notification
+            console.log('Search starting notification received:', message.content);
+            // Immediately update the UI to show the new search
+            if (message.content) {
+                updateSearchStatusImmediate({
+                    inProgress: true,
+                    type: message.content.type,
+                    current: message.content.current - 1, // Adjust for display
+                    total: message.content.total,
+                    searchTerm: message.content.searchWord,
+                    timeRemaining: 5000, // Show a brief "searching..." state
+                    percentComplete: 0
+                });
+            }
+            break;
+            
+        case 'searchProgressUpdate':
+            // Handle real-time progress updates during waits
+            console.log('Live progress update received:', message.content);
+            if (message.content && message.content.inProgress) {
+                updateSearchStatusImmediate(message.content);
+            }
             break;
             
         case 'searchSkipped':
@@ -581,6 +709,74 @@ function updateScheduleDisplay(response) {
                     }
                 });
             });
+        }
+    }
+}
+
+// Global variable to track search status for client-side countdown
+let lastSearchStatus = null;
+
+// Add client-side countdown timer for smoother UI updates
+function updateClientSideCountdown() {
+    if (!lastSearchStatus || !lastSearchStatus.inProgress) {
+        return;
+    }
+    
+    // Calculate time remaining based on when we last got the update
+    const now = new Date();
+    const timeSinceUpdate = now - (lastSearchStatus.lastUpdateTime || now);
+    const adjustedTimeRemaining = Math.max(0, lastSearchStatus.timeRemaining - timeSinceUpdate);
+    
+    // Update the display if we have a time remaining element
+    const timeElement = document.querySelector('.time-remaining');
+    if (timeElement && adjustedTimeRemaining > 0) {
+        const timeRemainingSeconds = Math.floor(adjustedTimeRemaining / 1000);
+        const minutesRemaining = Math.floor(timeRemainingSeconds / 60);
+        const secondsRemaining = timeRemainingSeconds % 60;
+        const timeFormatted = `${minutesRemaining}:${secondsRemaining.toString().padStart(2, '0')}`;
+        timeElement.textContent = `Next: ${timeFormatted}`;
+    }
+    
+    // Update the countdown progress bar with enhanced smoothing
+    const countdownBar = document.querySelector('.countdown-progress-bar');
+    if (countdownBar && lastSearchStatus.searchInterval) {
+        // Check if this is a new search by comparing with tracking key
+        const currentClientSearchKey = `${lastSearchStatus.type}-${lastSearchStatus.current}`;
+        if (lastSearchTrackingKey !== currentClientSearchKey) {
+            // Reset countdown progress for new search
+            lastCountdownProgress = null;
+            lastSearchTrackingKey = currentClientSearchKey;
+            console.log('Client-side new search detected, reset progress:', currentClientSearchKey);
+        }
+        
+        const totalElapsed = lastSearchStatus.searchInterval - adjustedTimeRemaining;
+        const percentComplete = Math.max(0, Math.min(100, Math.floor((totalElapsed / lastSearchStatus.searchInterval) * 100)));
+        let countdownProgress = Math.max(0, Math.min(100, 100 - percentComplete));
+        
+        // Validate the calculated progress
+        if (isNaN(countdownProgress) || !isFinite(countdownProgress)) {
+            console.warn('Invalid client-side countdown progress:', countdownProgress);
+            countdownProgress = lastCountdownProgress || 100;
+        }
+        
+        // Prevent progress bar from jumping backwards using the global tracking variable
+        if (lastCountdownProgress !== null && countdownProgress > lastCountdownProgress) {
+            // Allow small tolerance for rounding differences
+            if (countdownProgress - lastCountdownProgress > 1) {
+                countdownProgress = lastCountdownProgress;
+            }
+        }
+        
+        // Update the bar and tracking variable
+        if (lastCountdownProgress === null || countdownProgress <= lastCountdownProgress) {
+            countdownBar.style.width = `${countdownProgress}%`;
+            lastCountdownProgress = countdownProgress;
+        }
+        
+        // If countdown is nearly complete, ensure it shows as complete
+        if (adjustedTimeRemaining < 1000) {
+            countdownBar.style.width = '0%';
+            lastCountdownProgress = 0;
         }
     }
 }
