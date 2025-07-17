@@ -1548,6 +1548,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
                 break;
                 
+            case 'stopSearches':
+                // Handle stop searches request
+                console.log('Stop searches requested');
+                try {
+                    if (searchQuest) {
+                        // Stop the current search quest
+                        searchQuest.forceStop().then(() => {
+                            sendResponse({
+                                success: true,
+                                message: 'Searches stopped until manually restarted'
+                            });
+                        }).catch(error => {
+                            console.error('Error stopping searches:', error);
+                            sendResponse({
+                                success: false,
+                                error: error.message || 'Error stopping searches'
+                            });
+                        });
+                        // Return true to indicate async response
+                        return true;
+                    } else {
+                        sendResponse({
+                            success: false,
+                            error: 'No search quest available to stop'
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error stopping searches:', error);
+                    sendResponse({
+                        success: false,
+                        error: error.message || 'Error stopping searches'
+                    });
+                }
+                break;
+                
             default:
                 // For unhandled messages, send a response to avoid hanging
                 sendResponse({success: false, error: 'Unknown action'});

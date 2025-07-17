@@ -387,6 +387,7 @@ function updateSearchStatusImmediate(response) {
                             <div class="search-buttons">
                                 <button id="skip-search-button" class="skip-button">Skip</button>
                                 <button id="force-search-button" class="force-button">Next</button>
+                                <button id="stop-search-button" class="stop-button">Stop</button>
                             </div>
                         </div>
                     ` : ''}
@@ -410,6 +411,14 @@ function updateSearchStatusImmediate(response) {
                 const newForceButton = forceButton.cloneNode(true);
                 forceButton.parentNode.replaceChild(newForceButton, forceButton);
                 newForceButton.addEventListener('click', forceNextSearch);
+            }
+            
+            const stopButton = document.getElementById('stop-search-button');
+            if (stopButton) {
+                // Remove any existing listeners first
+                const newStopButton = stopButton.cloneNode(true);
+                stopButton.parentNode.replaceChild(newStopButton, stopButton);
+                newStopButton.addEventListener('click', stopSearches);
             }
         } else {
             // Clear the last search status when not in progress
@@ -491,6 +500,46 @@ function forceNextSearch() {
         if (forceButton) {
             forceButton.disabled = false;
             forceButton.textContent = 'Next';
+        }
+        
+        // Request fresh search progress after a short delay
+        setTimeout(requestSearchProgress, 500);
+    });
+}
+
+function stopSearches() {
+    console.log('Stop searches button clicked');
+    
+    // Disable the button while processing
+    const stopButton = document.getElementById('stop-search-button');
+    if (stopButton) {
+        stopButton.disabled = true;
+        stopButton.textContent = 'Stopping...';
+    }
+    
+    // Send stop request to background script
+    chrome.runtime.sendMessage({
+        action: 'stopSearches'
+    }, response => {
+        console.log('Stop response:', response);
+        
+        // Update the button based on response
+        if (stopButton) {
+            stopButton.disabled = false;
+            if (response && response.success) {
+                stopButton.textContent = 'Stopped';
+                // Change back to "Stop" after a moment
+                setTimeout(() => {
+                    stopButton.textContent = 'Stop';
+                }, 2000);
+                
+                // Force a refresh of the popup to show stopped state
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            } else {
+                stopButton.textContent = 'Stop';
+            }
         }
         
         // Request fresh search progress after a short delay
