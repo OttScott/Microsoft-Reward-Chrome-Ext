@@ -23,6 +23,8 @@ class SearchQuest {
         this._jobStatus_ = STATUS_NONE;
         this._targetSearchCount = null; // Clear target count to force recalculation
         this._pausedBySchedule = false; // Clear pause flag on reset
+        this._manuallyPaused = false; // Clear manual pause flag on reset
+        this._forceStopped = false; // Clear force stop flag on reset
         
         // When resetting, recalculate search interval for variety
         this._loadSearchSettings().then(() => {
@@ -56,6 +58,10 @@ class SearchQuest {
     }
 
     get jobStatus() {
+        // If manually stopped or force stopped, return STATUS_DONE
+        if (this._manuallyPaused || this._forceStopped) {
+            return STATUS_DONE;
+        }
         return this._jobStatus_;
     }
 
@@ -2068,21 +2074,56 @@ class SearchQuest {
         } catch (error) {
             console.error('Error saving progress during force stop:', error);
         }
-        // Mark as done so the search loop will exit
-        this._jobStatus_ = STATUS_DONE;
-        // Clear search type and timers to prevent further searches
-        this._currentSearchType_ = null;
-        this._nextSearchTime = null;
-        // Save pause timestamp and reason
+        
+        // Add debugging for each property assignment
+        try {
+            console.log('Setting _jobStatus_ to STATUS_DONE');
+            // Check if we can set the property
+            if (this.hasOwnProperty('_jobStatus_') || '_jobStatus_' in this) {
+                this._jobStatus_ = STATUS_DONE;
+                console.log('Successfully set _jobStatus_');
+            } else {
+                console.warn('Cannot set _jobStatus_ - property not accessible');
+                // Try alternative approach - use a flag that other methods can check
+                this._forceStopped = true;
+            }
+        } catch (error) {
+            console.error('Error setting _jobStatus_:', error);
+            // Set alternative flag
+            this._forceStopped = true;
+        }
+        
+        // Save pause timestamp and reason (before clearing currentSearchType)
+        const currentSearchType = this._currentSearchType_; // Save before clearing
+        
+        try {
+            console.log('Setting _currentSearchType_ to null');
+            this._currentSearchType_ = null;
+            console.log('Successfully set _currentSearchType_');
+        } catch (error) {
+            console.error('Error setting _currentSearchType_:', error);
+            throw error;
+        }
+        
+        try {
+            console.log('Setting _nextSearchTime to null');
+            this._nextSearchTime = null;
+            console.log('Successfully set _nextSearchTime');
+        } catch (error) {
+            console.error('Error setting _nextSearchTime:', error);
+            throw error;
+        }
+        
         chrome.storage.local.set({
             'searchPausedAt': new Date().toISOString(),
             'pausedSearchCount': this._currentSearchCount_,
-            'pausedSearchType': this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'pc' : 'mb',
-            'searchPausedReason': 'scheduleEnd'
+            'pausedSearchType': currentSearchType == SEARCH_TYPE_PC_SEARCH ? 'pc' : 'mb',
+            'searchPausedReason': 'manualStop'
         });
-        // Set flag to indicate this was paused by schedule
-        this._pausedBySchedule = true;
-        console.log('Search quest successfully paused');
+        // Set flag to indicate this was paused manually
+        this._pausedBySchedule = false;
+        this._manuallyPaused = true;
+        console.log('Search quest successfully stopped');
         return true;
     }
 }
