@@ -522,7 +522,7 @@ async function resumeFromSchedulePause() {
     // Start background work with a small delay
     console.log('Scheduling background work after resume');
     setTimeout(() => {
-        doBackgroundWork();
+        doBackgroundWork('schedule-resume');
     }, 5000);
     
     console.log('Schedule resume complete');
@@ -695,9 +695,9 @@ async function waitTillOnline() {
     }, waitTime);
 }
 
-async function doBackgroundWork() {
+async function doBackgroundWork(context) {
     console.log('=== BACKGROUND WORK DEBUG START ===');
-    console.log('Background work starting...');
+    console.log('Background work starting with context:', context);
     
     // Enhanced logging for debugging wake-up issues
     console.log('Current state check:', {
@@ -719,10 +719,11 @@ async function doBackgroundWork() {
     const lastWorkTime = await chrome.storage.local.get('lastWorkAttempt');
     const now = Date.now();
     
-    // Check if this is a manual start or initialization by looking at the call stack or a flag
-    const isManualStart = arguments.length > 0 && arguments[0] === 'manualStart';
-    const isInitialization = arguments.length > 0 && arguments[0] === 'initialization';
-    const shouldBypassRapidRetry = isManualStart || isInitialization;
+    // Check if this is a manual start, initialization, or schedule resume
+    const isManualStart = context === 'manualStart';
+    const isInitialization = context === 'initialization';
+    const isScheduleResume = context === 'schedule-resume';
+    const shouldBypassRapidRetry = isManualStart || isInitialization || isScheduleResume;
     
     if (lastWorkTime.lastWorkAttempt && !shouldBypassRapidRetry) {
         const timeSinceLastWork = now - lastWorkTime.lastWorkAttempt;
@@ -809,8 +810,8 @@ async function doBackgroundWork() {
             mbCompleted: initialMbCompleted
         });
         
-        // Run the reward status check
-        await checkDailyRewardStatus();
+        // Run the reward status check, passing context
+        await checkDailyRewardStatus(context);
         
         // Log the current search quest job status
         console.log('Search quest job status after reward check:', {
@@ -940,8 +941,8 @@ async function setTimeoutAsync(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function checkDailyRewardStatus() {
-    console.log('Checking daily reward status...');
+async function checkDailyRewardStatus(context) {
+    console.log('Checking daily reward status with context:', context);
     
     // Add status check cooldown
     const lastStatusCheck = await chrome.storage.local.get('lastStatusCheck');
@@ -975,7 +976,7 @@ async function checkDailyRewardStatus() {
             throw new Error('Invalid status update result');
         }
         
-        await doSearchQuests();
+        await doSearchQuests(context);
         await checkQuizAndDaily();
         
     } catch (error) {
@@ -1010,9 +1011,9 @@ async function checkQuizAndDaily() {
     }
 }
 
-async function doSearchQuests() {
+async function doSearchQuests(context) {
     try {
-        console.log('Starting search quests check...');
+        console.log('Starting search quests check with context:', context);
         
         if (!userDailyStatus || !userDailyStatus.summary) {
             console.error('Invalid user status for search quests, aborting');
@@ -1036,19 +1037,20 @@ async function doSearchQuests() {
             }
         });
         
-        // IMPORTANT FIX: Force search flag to true - this overrides the auto-detection
-        // which is incorrectly determining searches are completed
-        const forceSearches = true;
+        // Only force searches when resuming from a schedule pause
+        // This ensures searches start reliably after scheduled wake-up
+        // but respects completion status for normal checks
+        const forceSearches = context === 'schedule-resume';
         
-        // Fix the logic to determine if searches are needed
+        // Determine if searches are needed based on actual completion status
         // 1. If PC searches are not completed and valid, we need searches
         // 2. If mobile searches are not completed and valid, we need searches 
-        // 3. If forceSearches is true, we always do searches
+        // 3. If forceSearches is true (schedule-resume), we always do searches
         const areSearchesNeeded = forceSearches || 
             (!userDailyStatus.pcSearchStatus.isCompleted && userDailyStatus.pcSearchStatus.isValid) || 
             (!userDailyStatus.mbSearchStatus.isCompleted && userDailyStatus.mbSearchStatus.isValid);
         
-        console.log('Are searches needed:', areSearchesNeeded, '(forced:', forceSearches, ')');
+        console.log('Are searches needed:', areSearchesNeeded, '(forced by schedule-resume:', forceSearches, ')');
         
         if (!areSearchesNeeded) {
             console.log('No searches needed based on detailed status check.');
