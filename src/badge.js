@@ -107,6 +107,13 @@ class ScheduleInactiveBadge extends Badge {
     }
 }
 
+class OffBadge extends Badge {
+    constructor() {
+        // Gray badge when outside schedule window
+        super('off', 'img/grey@1.5x.png', 'off', [128, 128, 128, 100]);
+    }
+}
+
 let _currentBadge = null;
 function setBadge(badge) {
     badge.set();

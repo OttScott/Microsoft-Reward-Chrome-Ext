@@ -6,6 +6,11 @@ let lastCountdownProgress = null;
 let lastSearchTrackingKey = null;
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Check for missed morning start when popup opens
+    chrome.runtime.sendMessage({
+        action: 'checkMissedMorningStart'
+    });
+    
     // Force immediate background refresh on popup open to get fresh data
     chrome.runtime.sendMessage({
         action: 'checkStatus',

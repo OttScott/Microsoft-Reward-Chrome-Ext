@@ -70,8 +70,23 @@ class SearchQuest {
         console.log('SearchQuest.doWork() starting with status:', {
             isValid: status.summary?.isValid,
             pcCompleted: status.pcSearchStatus?.isCompleted,
-            mbCompleted: status.mbSearchStatus?.isCompleted
+            mbCompleted: status.mbSearchStatus?.isCompleted,
+            maxDailyPoints: status.summary?.maxDailySearchPoints,
+            currentPoints: status.summary?.searchPointsEarned
         });
+        
+        // Notify user if Microsoft has increased the daily point limit
+        const maxDailyPoints = status.summary?.maxDailySearchPoints || 150;
+        if (maxDailyPoints > 150) {
+            console.log(`🎉 Detected increased daily limit: ${maxDailyPoints} points!`);
+            chrome.notifications.create({
+                type: 'basic',
+                iconUrl: 'img/bingRwLogo@3x.png',
+                title: 'Microsoft Rewards Bonus!',
+                message: `Daily search limit increased to ${maxDailyPoints} points! Extension will search until reaching the maximum.`,
+                priority: 1
+            });
+        }
         
         // Add retry logic for initialization
         let maxAttempts = 3;
@@ -247,7 +262,11 @@ class SearchQuest {
                 // After PC completes, check if we should do mobile
                 // Re-evaluate the status in case something changed
                 console.log('PC search completed, updating status before checking mobile...');
-                await this._status_.update();
+                if (this._status_ && typeof this._status_.update === 'function') {
+                    await this._status_.update();
+                } else {
+                    console.warn('⚠️ Status object not available for update in smart searches');
+                }
                 
                 // Debug: Check status after update
                 console.log('Status after PC completion and update:', {
@@ -282,7 +301,9 @@ class SearchQuest {
             }
             
             // Re-evaluate what's still needed after each completion
-            await this._status_.update();
+            if (this._status_ && typeof this._status_.update === 'function') {
+                await this._status_.update();
+            }
             pcCanEarnPoints = !this._status_.pcSearchStatus.isCompleted && this._canEarnMorePoints('pc');
             mbCanEarnPoints = !settings.disableMobile && !this._status_.mbSearchStatus.isCompleted && this._canEarnMorePoints('mb');
             
@@ -371,25 +392,39 @@ class SearchQuest {
     _canEarnMorePoints(searchType) {
         // Check if this search type can still earn points based on daily limits
         try {
+            // FIRST: Check if we've hit the total daily maximum across all search types
+            const totalSearchPoints = this._status_.summary?.searchPointsEarned || 0;
+            const maxDailyPoints = this._status_.summary?.maxDailySearchPoints || 150;
+            
+            if (totalSearchPoints >= maxDailyPoints) {
+                console.log(`🏁 Daily maximum reached: ${totalSearchPoints}/${maxDailyPoints} points`);
+                return false;
+            }
+            
+            // SECOND: Check individual search type limits
             if (searchType === 'pc') {
                 const status = this._status_.pcSearchStatus;
                 console.log(`PC point earning check:`, {
                     progress: status.progress,
                     progressMax: status.progressMax,
                     isCompleted: status.isCompleted,
-                    canEarnMore: status.progress < status.progressMax && !status.isCompleted
+                    totalPoints: totalSearchPoints,
+                    dailyMax: maxDailyPoints,
+                    canEarnMore: status.progress < status.progressMax && !status.isCompleted && totalSearchPoints < maxDailyPoints
                 });
-                // Consider maxed if progress equals or exceeds the progress max (daily point limit)
-                return status.progress < status.progressMax && !status.isCompleted;
+                // Can earn if: not at search limit AND not at daily point limit
+                return status.progress < status.progressMax && !status.isCompleted && totalSearchPoints < maxDailyPoints;
             } else if (searchType === 'mb') {
                 const status = this._status_.mbSearchStatus;
                 console.log(`Mobile point earning check:`, {
                     progress: status.progress,
                     progressMax: status.progressMax,
                     isCompleted: status.isCompleted,
-                    canEarnMore: status.progress < status.progressMax && !status.isCompleted
+                    totalPoints: totalSearchPoints,
+                    dailyMax: maxDailyPoints,
+                    canEarnMore: status.progress < status.progressMax && !status.isCompleted && totalSearchPoints < maxDailyPoints
                 });
-                return status.progress < status.progressMax && !status.isCompleted;
+                return status.progress < status.progressMax && !status.isCompleted && totalSearchPoints < maxDailyPoints;
             }
         } catch (error) {
             console.warn('Error checking point earning potential:', error);
@@ -668,7 +703,11 @@ class SearchQuest {
         // Update status after PC search completion
         try {
             console.log('Updating status after PC search completion');
-            await this._status_.update();
+            if (this._status_ && typeof this._status_.update === 'function') {
+                await this._status_.update();
+            } else {
+                console.warn('⚠️ Status object not available for update after PC search');
+            }
         } catch (error) {
             console.error('Failed to update status after PC search:', error);
         }
@@ -717,7 +756,11 @@ class SearchQuest {
         // Update status after mobile search completion
         try {
             console.log('Updating status after mobile search completion');
-            await this._status_.update();
+            if (this._status_ && typeof this._status_.update === 'function') {
+                await this._status_.update();
+            } else {
+                console.warn('⚠️ Status object not available for update after mobile search');
+            }
         } catch (error) {
             console.error('Failed to update status after mobile search:', error);
         }

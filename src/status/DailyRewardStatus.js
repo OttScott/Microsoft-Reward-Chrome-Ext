@@ -177,6 +177,9 @@ class DailyRewardStatus {
                     'lastSearchTime': null
                 }, (data) => {
                     try {
+                        // Extract daily maximum search points from Microsoft Rewards page
+                        const dailyMaxPoints = this._extractDailyMaxSearchPoints(htmlText);
+                        
                         // Create status objects using stored data where possible
                         this._summary_ = {
                             isValid: true,
@@ -187,7 +190,9 @@ class DailyRewardStatus {
                             // Add daily stats properties
                             dailyGoal: this._extractDailyGoal(htmlText) || 90,
                             dayStreak: this._extractDayStreak(htmlText) || 0,
-                            maxDayStreak: this._extractMaxStreak(htmlText) || 0
+                            maxDayStreak: this._extractMaxStreak(htmlText) || 0,
+                            // Maximum daily search points (dynamic - changes during promotions)
+                            maxDailySearchPoints: dailyMaxPoints
                         };
 
                         // Use actual stored search counts instead of random values
@@ -218,15 +223,29 @@ class DailyRewardStatus {
                         this._summary_.searchPointsEarned = this._extractSearchPointsEarned(htmlText) || 
                             (data.pcSearchCount * 5 + data.mbSearchCount * 5); // Estimate based on search counts
 
-                        // Update completion status
+                        // Update completion status based on search counts
                         this._pcSearchStatus_.isCompleted = this._pcSearchStatus_.progress >= this._pcSearchStatus_.progressMax;
                         this._mbSearchStatus_.isCompleted = this._mbSearchStatus_.progress >= this._mbSearchStatus_.progressMax;
                         this._pcSearchStatus_.isValidAndCompleted = this._pcSearchStatus_.isCompleted;
                         this._mbSearchStatus_.isValidAndCompleted = this._mbSearchStatus_.isCompleted;
 
-                        // Summary completion status 
-                        this._summary_.isCompleted = this._pcSearchStatus_.isCompleted && 
-                                                    this._mbSearchStatus_.isCompleted;
+                        // TRUE completion: Check if we've hit the daily maximum points
+                        // This handles cases where Microsoft increases daily limits (e.g., 300 points during promotions)
+                        const totalSearchPoints = this._summary_.searchPointsEarned;
+                        const maxDailyPoints = this._summary_.maxDailySearchPoints;
+                        const hasReachedDailyMax = totalSearchPoints >= maxDailyPoints;
+                        
+                        console.log('📊 Daily points status:', {
+                            earned: totalSearchPoints,
+                            max: maxDailyPoints,
+                            reachedMax: hasReachedDailyMax,
+                            pcSearches: this._pcSearchStatus_.progress,
+                            mbSearches: this._mbSearchStatus_.progress
+                        });
+
+                        // Summary completion status - consider truly complete when daily max is reached
+                        this._summary_.isCompleted = hasReachedDailyMax || 
+                            (this._pcSearchStatus_.isCompleted && this._mbSearchStatus_.isCompleted);
 
                         // Calculate if goal is completed
                         this._summary_.isGoalCompleted = this._summary_.earnedToday >= this._summary_.dailyGoal;
@@ -361,16 +380,47 @@ class DailyRewardStatus {
         return currentStreak + Math.floor(Math.random() * 10) + 5;
     }
 
+    // Extract the maximum daily search points limit from Microsoft Rewards page
+    _extractDailyMaxSearchPoints(html) {
+        try {
+            // Patterns to find the daily maximum (e.g., "65 of 300 daily search points")
+            const maxPointsPatterns = [
+                /\d+\s+of\s+(\d+)\s+daily\s+search\s+points/i,     // "65 of 300 daily search points"
+                /\d+\/(\d+)\s+search\s+points/i,                    // "65/300 search points"
+                /search\s+points.*?(\d{3})\s+max/i,                 // "search points 300 max"
+                /daily\s+max.*?(\d{3})\s+points/i                   // "daily max 300 points"
+            ];
+            
+            for (const pattern of maxPointsPatterns) {
+                const match = html.match(pattern);
+                if (match && match[1]) {
+                    const maxPoints = parseInt(match[1], 10);
+                    // Sanity check: max should be between 100 and 500
+                    if (maxPoints >= 100 && maxPoints <= 500) {
+                        console.log(`✅ Extracted daily max search points: ${maxPoints}`);
+                        return maxPoints;
+                    }
+                }
+            }
+            
+            console.log('⚠️ Could not extract daily max points, using default 150');
+            return 150; // Default fallback
+        } catch (e) {
+            console.error('Error extracting daily max search points:', e);
+            return 150;
+        }
+    }
+
     // Helper method to extract search points earned from page content
     _extractSearchPointsEarned(html) {
         try {
             // Only extract search points - not total points earned
             const searchPointsPatterns = [
-                /(\d+)\s+of\s+\d+\s+daily\s+search\s+points/i,                 // "65 of 150 daily search points"
+                /(\d+)\s+of\s+\d+\s+daily\s+search\s+points/i,                 // "65 of 300 daily search points"
                 /(\d+)\s+search\s+points?\s+today/i,                           // "65 search points today"
                 /search\s+points\s+earned\s*(?::|=)\s*(\d+)/i,                 // "search points earned: 65"
                 /earned\s+(\d+)\s+points?\s+from\s+searches/i,                 // "earned 65 points from searches"
-                /(\d+)\/\d+\s+search\s+points/i                                // "65/150 search points"
+                /(\d+)\/\d+\s+search\s+points/i                                // "65/300 search points"
             ];
             
             // Try to find a specific search points mention
