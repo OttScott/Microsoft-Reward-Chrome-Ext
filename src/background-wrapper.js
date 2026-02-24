@@ -36,6 +36,7 @@ const scripts = [
     'googleTrend.js',
     'status/DailyRewardStatus.js',
     'quest/searchQuest.js',
+    'quest/dailyTasksQuest.js',
     'background.js'
 ];
 
