@@ -975,7 +975,7 @@ class SearchQuest {
 
     async _requestBingSearch() {
         // FIXED BUG: Always initialize the status if needed
-        if (!this._currentSearchType_) {
+        if (this._currentSearchType_ === null || this._currentSearchType_ === undefined) {
             console.warn('Search type not initialized, determining appropriate type...');
             
             // Determine which search type to start with based on completion status
@@ -1032,7 +1032,7 @@ class SearchQuest {
                 console.log(`Search loop iteration ${loopCounter} - Current: ${this._currentSearchCount_}, Max: ${this._getCurrentMaxSearches()}, Completed: ${this._isCurrentSearchCompleted()}, Status: ${this._jobStatus_}`);
                 
                 // Ensure search type is still properly set - if lost, try to restore it intelligently
-                if (!this._currentSearchType_) {
+                if (this._currentSearchType_ === null || this._currentSearchType_ === undefined) {
                     console.warn('Search type lost during loop, attempting to restore based on context');
                     
                     // Try to determine correct search type based on current search context
@@ -1153,7 +1153,7 @@ class SearchQuest {
 
     async _requestLimitedBingSearch(maxSearches) {
         // FIXED BUG: Always initialize the status if needed
-        if (!this._currentSearchType_) {
+        if (this._currentSearchType_ === null || this._currentSearchType_ === undefined) {
             console.warn('Search type not initialized, defaulting to PC search');
             this._preparePCSearch();
         }
@@ -1170,7 +1170,7 @@ class SearchQuest {
                    (this._currentSearchCount_ - startingCount) < maxSearches) {
                 
                 // Ensure search type is still properly set - DON'T reset during active loop
-                if (!this._currentSearchType_) {
+                if (this._currentSearchType_ === null || this._currentSearchType_ === undefined) {
                     console.error('Search type lost during limited search loop, stopping to prevent infinite loop');
                     this._jobStatus_ = STATUS_ERROR;
                     break;
@@ -1755,7 +1755,7 @@ class SearchQuest {
         }
         
         // Enhanced validation and initialization check
-        if (!this._currentSearchType_) {
+        if (this._currentSearchType_ === null || this._currentSearchType_ === undefined) {
             // Only log this warning occasionally to prevent log spam
             if (!this._lastSearchTypeWarning || Date.now() - this._lastSearchTypeWarning > 10000) {
                 console.warn('Search type not initialized in completion check');
@@ -1811,32 +1811,17 @@ class SearchQuest {
         // Priority 1: Use status searchNeededCount (what Microsoft actually needs)
         if (status.searchNeededCount && status.searchNeededCount > 0) {
             neededCount = status.searchNeededCount;
-            console.log(`Using status-based needed count for completion: ${neededCount}`);
         }
         // Priority 2: Use the stored target count if available
         else if (this._targetSearchCount && this._targetSearchCount > 0) {
             neededCount = this._targetSearchCount;
-            console.log(`Using cached target count for completion: ${neededCount}`);
         }
         // Priority 3: Use reasonable defaults
         else {
             neededCount = type === 'PC' ? 30 : 20;
-            console.warn(`Using default search count for ${type} completion: ${neededCount}`);
         }
 
-        const isComplete = currentProgress >= neededCount;
-
-        console.log(`${type} search completion check:`, {
-            current: currentProgress,
-            needed: neededCount,
-            isComplete: isComplete,
-            statusValid: status.isValid,
-            statusCompleted: status.isCompleted,
-            targetFromCache: this._targetSearchCount,
-            targetFromStatus: status.searchNeededCount
-        });
-
-        return isComplete;
+        return currentProgress >= neededCount;
     }
 
     getSearchProgress() {
@@ -1945,7 +1930,6 @@ class SearchQuest {
                 }
             }
             
-            console.log('Search progress:', progress);
             return progress;
         }
         

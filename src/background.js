@@ -19,6 +19,7 @@ let isSchedulePaused = false; // Track if we're currently paused by schedule
 let googleTrend = new GoogleTrend();
 let userDailyStatus = new DailyRewardStatus();
 let searchQuest = new SearchQuest(googleTrend);
+let exploreQuest = new ExploreQuest();
 
 console.log('Background script loading - ' + new Date().toISOString());
 
@@ -101,6 +102,9 @@ async function handleMorningRestart() {
         // Reset all systems for new day
         if (searchQuest) {
             searchQuest.reset();
+        }
+        if (exploreQuest) {
+            exploreQuest.reset();
         }
         if (userDailyStatus) {
             userDailyStatus.reset();
@@ -412,6 +416,7 @@ function setupMidnightReset() {
         
         // Force searchQuest and userDailyStatus to reset and recalculate everything
         if (searchQuest) searchQuest.reset();
+        if (exploreQuest) exploreQuest.reset();
         if (userDailyStatus) userDailyStatus.reset();
         if (googleTrend) googleTrend.reset();
         
@@ -582,6 +587,7 @@ async function checkAndRestoreNextDayTimer() {
                     
                     // Reset all systems for the new day
                     if (searchQuest) searchQuest.reset();
+                    if (exploreQuest) exploreQuest.reset();
                     if (userDailyStatus) userDailyStatus.reset();
                     if (googleTrend) googleTrend.reset();
                     
@@ -1428,6 +1434,7 @@ async function checkDayChange() {
                 // Reset objects
                 googleTrend.reset();
                 searchQuest.reset();
+                if (exploreQuest) exploreQuest.reset();
                 userDailyStatus.reset();
                 
                 // Clear old schedule and force new one for today
@@ -1491,8 +1498,9 @@ async function checkDailyRewardStatus() {
             throw new Error('Invalid status update result');
         }
         
-        await doSearchQuests();
+        await doExploreTasks();
         await checkQuizAndDaily();
+        await doSearchQuests();
         
     } catch (error) {
         console.error('Error in daily status update:', error);
@@ -1523,6 +1531,49 @@ async function checkQuizAndDaily() {
     } catch (error) {
         console.error('Error checking quiz and daily activities:', error);
         // Don't let this error interrupt the overall flow
+    }
+}
+
+async function doExploreTasks() {
+    try {
+        console.log('Checking Explore on Bing tasks...');
+
+        // Skip if already busy (e.g. running in parallel)
+        if (exploreQuest && exploreQuest.jobStatus === STATUS_BUSY) {
+            console.log('ExploreQuest already running, skipping');
+            return;
+        }
+
+        // Initialize if not already
+        if (!exploreQuest) {
+            exploreQuest = new ExploreQuest();
+        }
+
+        const result = await exploreQuest.doWork();
+
+        if (result.skipped) {
+            console.log('Explore tasks disabled in settings');
+        } else if (result.success) {
+            console.log(`Explore tasks completed: ${result.completed}/${result.total} task(s) processed`);
+            if (result.completed > 0) {
+                try {
+                    await chrome.notifications.create('explore-tasks-complete', {
+                        type: 'basic',
+                        iconUrl: 'img/bingRwLogo@3x.png',
+                        title: 'Explore Tasks Done!',
+                        message: `Completed ${result.completed} "Explore on Bing" task${result.completed > 1 ? 's' : ''}.`,
+                        priority: 1
+                    });
+                } catch (notifError) {
+                    console.log('Explore tasks notification failed (may be disabled):', notifError.message);
+                }
+            }
+        } else {
+            console.warn('Explore tasks did not complete successfully:', result.error);
+        }
+    } catch (error) {
+        console.error('Error running explore tasks:', error);
+        // Non-fatal - don't interrupt the rest of background work
     }
 }
 
@@ -1740,7 +1791,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 // Add a way to force work to start immediately for debugging
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('Message received:', message);
+    console.debug('Message received:', message);
     
     // Handle async operations properly
     const handleMessage = async () => {
@@ -1811,7 +1862,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             case 'getSearchProgress':
                 if (searchQuest && searchQuest.jobStatus === STATUS_BUSY) {
                     const searchInfo = searchQuest.getSearchProgress();
-                    console.log('Returning search progress to UI:', searchInfo);
+                    console.debug('Returning search progress to UI:', searchInfo);
                     
                     // Ensure we send all required properties
                     sendResponse({
@@ -2143,6 +2194,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
                 break;
                 
+            case 'getExploreTasksStatus':
+                // Return the current explore tasks status (tasks, completion counts)
+                try {
+                    const exploreStatus = exploreQuest ? exploreQuest.getStatus() : null;
+                    sendResponse({ success: true, exploreStatus });
+                } catch (error) {
+                    sendResponse({ success: false, error: error.message });
+                }
+                break;
+
+            case 'startExploreTasks':
+                // Manually kick off explore tasks
+                console.log('Manual explore tasks start requested');
+                if (exploreQuest && exploreQuest.jobStatus === STATUS_BUSY) {
+                    sendResponse({ success: false, error: 'Explore tasks already running' });
+                } else {
+                    if (!exploreQuest) exploreQuest = new ExploreQuest();
+                    doExploreTasks().then(() => {
+                        sendResponse({ success: true });
+                    }).catch(error => {
+                        sendResponse({ success: false, error: error.message });
+                    });
+                    return true; // async response
+                }
+                break;
+
             default:
                 // For unhandled messages, send a response to avoid hanging
                 sendResponse({success: false, error: 'Unknown action'});

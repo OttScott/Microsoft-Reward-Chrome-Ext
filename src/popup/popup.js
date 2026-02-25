@@ -54,6 +54,12 @@ document.addEventListener('DOMContentLoaded', () => {
         action: 'checkStatus',
     });
 
+    // Add Explore Tasks button handler
+    const exploreBtn = document.getElementById('show-explore-tasks');
+    if (exploreBtn) {
+        exploreBtn.addEventListener('click', toggleExploreTasksPanel);
+    }
+
     // Add iframe link interceptor
     setupIframeLinkHandler();
 });
@@ -833,4 +839,121 @@ function updateClientSideCountdown() {
             lastCountdownProgress = 0;
         }
     }
+}
+// =============================================================================
+// Explore on Bing Tasks
+// =============================================================================
+
+let _explorePanelVisible = false;
+
+/**
+ * Toggle the explore tasks panel open/closed and populate it with live data.
+ */
+function toggleExploreTasksPanel() {
+    const panel = document.getElementById('explore-tasks-panel');
+    if (!panel) return;
+
+    _explorePanelVisible = !_explorePanelVisible;
+    if (_explorePanelVisible) {
+        panel.classList.add('visible');
+        requestExploreTasksStatus();
+    } else {
+        panel.classList.remove('visible');
+    }
+}
+
+/**
+ * Request the current explore tasks status from the background script
+ * and render them in the panel.
+ */
+function requestExploreTasksStatus() {
+    chrome.runtime.sendMessage({ action: 'getExploreTasksStatus' }, response => {
+        if (chrome.runtime.lastError) {
+            console.warn('Explore tasks status error:', chrome.runtime.lastError.message);
+            return;
+        }
+        renderExploreTasksPanel(response);
+    });
+}
+
+/**
+ * Renders the explore tasks panel with current task data.
+ * @param {object} response - Response from background script's getExploreTasksStatus handler.
+ */
+function renderExploreTasksPanel(response) {
+    const panel = document.getElementById('explore-tasks-panel');
+    if (!panel) return;
+
+    const exploreStatus = response && response.success ? response.exploreStatus : null;
+    const tasks = exploreStatus && exploreStatus.tasks ? exploreStatus.tasks : [];
+    const isRunning = exploreStatus && exploreStatus.jobStatus === 1 /* STATUS_BUSY */;
+    const completed = exploreStatus ? exploreStatus.completedThisRun : 0;
+
+    let tasksHtml = '';
+    if (tasks.length === 0) {
+        if (completed > 0) {
+            tasksHtml = `<div style="color:#4a4; font-size:11px; padding: 4px 0;">&#10003; ${completed} task${completed > 1 ? 's' : ''} completed this session. No further tasks pending.</div>`;
+        } else if (isRunning) {
+            tasksHtml = '<div style="color:#666; font-size:11px; padding: 4px 0;">Fetching tasks...</div>';
+        } else {
+            tasksHtml = '<div style="color:#666; font-size:11px; padding: 4px 0;">No pending explore tasks found.<br>' +
+                '<span style="color:#999;">All tasks may be complete for this week, not yet available on your account, or the fetch failed. ' +
+                'Check the service worker console for details.</span></div>';
+        }
+    } else {
+        tasks.forEach(task => {
+            let badgeClass = 'badge-pending';
+            let badgeText = '⏳ Pending';
+            if (task.complete) {
+                badgeClass = 'badge-complete';
+                badgeText = '✓ Done';
+            } else if (task.isActivated) {
+                badgeClass = 'badge-activated';
+                badgeText = '+ Active';
+            }
+
+            const pts = task.pointProgressMax > 0
+                ? ` (+${task.pointProgressMax - task.pointProgress} pts)`
+                : '';
+
+            tasksHtml += `
+                <div class="explore-task-row">
+                    <span class="explore-task-title" title="${escapeHtml(task.description)}">${escapeHtml(task.title)}${pts}</span>
+                    <span class="explore-task-badge ${badgeClass}">${badgeText}</span>
+                </div>`;
+        });
+    }
+
+    const runBtnLabel = isRunning ? 'Running...' : 'Run Now';
+    const runBtnDisabled = isRunning ? 'disabled' : '';
+
+    panel.innerHTML = `
+        <div class="explore-tasks-header">
+            <span>Explore on Bing Tasks${completed > 0 ? ` \u2014 ${completed} completed this session` : ''}</span>
+            <button id="run-explore-tasks" class="explore-run-btn" ${runBtnDisabled}>${runBtnLabel}</button>
+        </div>
+        ${tasksHtml}`;
+
+    // Wire up run button
+    const runBtn = document.getElementById('run-explore-tasks');
+    if (runBtn) {
+        runBtn.addEventListener('click', () => {
+            runBtn.disabled = true;
+            runBtn.textContent = 'Starting...';
+            chrome.runtime.sendMessage({ action: 'startExploreTasks' }, () => {
+                setTimeout(requestExploreTasksStatus, 3000);
+            });
+        });
+    }
+}
+
+/**
+ * Simple HTML entity escaping to prevent XSS from task titles/descriptions.
+ */
+function escapeHtml(str) {
+    return (str || '').replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }

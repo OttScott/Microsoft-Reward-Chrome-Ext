@@ -38,7 +38,8 @@ function saveOptions() {
         baseSearchInterval: document.getElementById('baseSearchInterval').value,
         intervalVariation: document.getElementById('intervalVariation').value,
         smartSwitching: document.getElementById('smartSwitching').checked,
-        interleaveSearches: document.getElementById('interleaveSearches').checked
+        interleaveSearches: document.getElementById('interleaveSearches').checked,
+        enableExploreTasks: document.getElementById('enableExploreTasks').checked
     };
 
     chrome.storage.sync.set(options, () => {
@@ -74,7 +75,8 @@ function restoreOptions() {
         baseSearchInterval: 15,  // 15 minutes default
         intervalVariation: 300,   // 5 minutes (300 seconds) variation
         smartSwitching: true,    // Default to smart switching enabled
-        interleaveSearches: false // Default to traditional sequential searches
+        interleaveSearches: false, // Default to traditional sequential searches
+        enableExploreTasks: true   // Default to explore tasks enabled
     }, function (options) {
         getElementCountdownAlgorithm().checked = options.compatibilityMode;
         getElementPcUaOverrideEnable().checked = options.pcUaOverrideEnable;
@@ -91,6 +93,7 @@ function restoreOptions() {
         document.getElementById('intervalVariation').value = options.intervalVariation;
         document.getElementById('smartSwitching').checked = options.smartSwitching;
         document.getElementById('interleaveSearches').checked = options.interleaveSearches;
+        document.getElementById('enableExploreTasks').checked = options.enableExploreTasks;
     });
 }
 
