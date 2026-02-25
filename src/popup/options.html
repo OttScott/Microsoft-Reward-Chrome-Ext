@@ -102,7 +102,34 @@
                 </div>
             </div>
             <div class="section">
-                <h3>Search Settings</h3>
+                <h3>Daily Tasks &amp; Quizzes</h3>
+                <p class="info-text">Automates the Microsoft Rewards daily set, quizzes, polls, and other activities.
+                    Answers are <strong>randomized</strong> so selections vary each day.</p>
+                <div class="option-row">
+                    <label for="enableDailyTasks">Enable automation:</label>
+                    <input type="checkbox" id="enableDailyTasks" />
+                </div>
+                <div class="option-row">
+                    <label for="randomizeAnswers" class="tooltip-bottom-left"
+                        data-tooltip="When enabled, answers are chosen at random from all available options – never always option A">
+                        Randomize answers:
+                    </label>
+                    <input type="checkbox" id="randomizeAnswers" checked />
+                </div>
+                <div class="option-row">
+                    <label for="dailyTaskDelay" class="tooltip-bottom-left"
+                        data-tooltip="Extra random offset (0&ndash;N minutes) added before daily tasks start, so the timing varies each cycle">
+                        Max random start delay (minutes):
+                    </label>
+                    <input type="number" id="dailyTaskDelay" min="0" max="60" value="5" />
+                </div>
+                <div class="info-text">
+                    Tasks run alongside your search session with a randomized delay.<br>
+                    Each quiz question picks a random answer option from all choices.<br>
+                    Requires the extension to stay running in the background.
+                </div>
+            </div>
+            <div class="section">
                 <div class="option-row">
                     <label for="baseSearchCount">Base number of searches:</label>
                     <input type="number" id="baseSearchCount" min="1" max="100" />

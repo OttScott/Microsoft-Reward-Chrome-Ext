@@ -37,6 +37,7 @@ const scripts = [
     'status/DailyRewardStatus.js',
     'quest/searchQuest.js',
     'quest/exploreQuest.js',
+    'quest/dailyTasksQuest.js',
     'background.js'
 ];
 

@@ -29,6 +29,7 @@
     "storage",
     "declarativeNetRequest",
     "tabs",
+    "scripting",
     "notifications",
     "alarms"
   ],

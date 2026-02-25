@@ -39,7 +39,10 @@ function saveOptions() {
         intervalVariation: document.getElementById('intervalVariation').value,
         smartSwitching: document.getElementById('smartSwitching').checked,
         interleaveSearches: document.getElementById('interleaveSearches').checked,
-        enableExploreTasks: document.getElementById('enableExploreTasks').checked
+        enableExploreTasks: document.getElementById('enableExploreTasks').checked,
+        enableDailyTasks: document.getElementById('enableDailyTasks').checked,
+        randomizeAnswers:  document.getElementById('randomizeAnswers').checked,
+        dailyTaskDelay:    parseInt(document.getElementById('dailyTaskDelay').value) || 0
     };
 
     chrome.storage.sync.set(options, () => {
@@ -76,7 +79,10 @@ function restoreOptions() {
         intervalVariation: 300,   // 5 minutes (300 seconds) variation
         smartSwitching: true,    // Default to smart switching enabled
         interleaveSearches: false, // Default to traditional sequential searches
-        enableExploreTasks: true   // Default to explore tasks enabled
+        enableExploreTasks: true,  // Default to explore tasks enabled
+        enableDailyTasks: false,
+        randomizeAnswers: true,
+        dailyTaskDelay: 5
     }, function (options) {
         getElementCountdownAlgorithm().checked = options.compatibilityMode;
         getElementPcUaOverrideEnable().checked = options.pcUaOverrideEnable;
@@ -94,6 +100,9 @@ function restoreOptions() {
         document.getElementById('smartSwitching').checked = options.smartSwitching;
         document.getElementById('interleaveSearches').checked = options.interleaveSearches;
         document.getElementById('enableExploreTasks').checked = options.enableExploreTasks;
+        document.getElementById('enableDailyTasks').checked = options.enableDailyTasks;
+        document.getElementById('randomizeAnswers').checked  = options.randomizeAnswers;
+        document.getElementById('dailyTaskDelay').value      = options.dailyTaskDelay;
     });
 }
 

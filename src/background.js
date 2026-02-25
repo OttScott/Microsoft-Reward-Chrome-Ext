@@ -20,6 +20,7 @@ let googleTrend = new GoogleTrend();
 let userDailyStatus = new DailyRewardStatus();
 let searchQuest = new SearchQuest(googleTrend);
 let exploreQuest = new ExploreQuest();
+let dailyTasksQuest = new DailyTasksQuest();
 
 console.log('Background script loading - ' + new Date().toISOString());
 
@@ -113,6 +114,9 @@ async function handleMorningRestart() {
         }
         if (googleTrend) {
             googleTrend.reset();
+        }
+        if (dailyTasksQuest) {
+            dailyTasksQuest.reset();
         }
         
         // Load user agents
@@ -419,6 +423,7 @@ function setupMidnightReset() {
         if (exploreQuest) exploreQuest.reset();
         if (userDailyStatus) userDailyStatus.reset();
         if (googleTrend) googleTrend.reset();
+        if (dailyTasksQuest) dailyTasksQuest.reset();
         
         // If there are ongoing searches, forcibly pause them
         if (searchQuest && searchQuest.jobStatus === STATUS_BUSY) {
@@ -1508,29 +1513,36 @@ async function checkDailyRewardStatus() {
     }
 }
 
-// Add the missing function
 async function checkQuizAndDaily() {
     console.log('Checking quiz and daily activities...');
-    
+
     try {
-        // For now, this is just a placeholder to prevent errors
-        // In the future, this could be expanded to handle quiz activities
-        if (!userDailyStatus || !userDailyStatus.summary) {
-            console.warn('Cannot check quiz/daily activities: user status not available');
+        if (!dailyTasksQuest) {
+            dailyTasksQuest = new DailyTasksQuest();
+        }
+
+        // Don't start if already running
+        if (dailyTasksQuest.jobStatus === STATUS_BUSY) {
+            console.log('[DailyTasks] Already in progress, skipping duplicate call.');
             return;
         }
-        
-        if (userDailyStatus.quizAndDailyStatus && userDailyStatus.quizAndDailyStatus.pointsToGet > 0) {
-            console.log(`Quiz/daily activities have ${userDailyStatus.quizAndDailyStatus.pointsToGet} points available`);
-            // Future: Implement logic to complete quizzes and daily activities
-        } else {
-            console.log('No quiz/daily activities to complete or already completed');
-        }
-        
-        debugLog('Quiz and daily activities check completed', LOG_LEVELS.INFO);
+
+        // Schedule with variable offset (0-10 min jitter) so tasks don't always
+        // fire at the exact same moment relative to searches.
+        const jitterMs = Math.random() * 10 * 60 * 1000;
+        console.log(`[DailyTasks] Scheduled to start in ${Math.round(jitterMs / 1000)}s`);
+
+        setTimeout(async () => {
+            try {
+                await dailyTasksQuest.doWork();
+            } catch (err) {
+                console.error('[DailyTasks] Error in doWork:', err);
+            }
+        }, jitterMs);
+
+        debugLog('Daily tasks quest scheduled.', LOG_LEVELS.INFO);
     } catch (error) {
-        console.error('Error checking quiz and daily activities:', error);
-        // Don't let this error interrupt the overall flow
+        console.error('Error scheduling quiz and daily activities:', error);
     }
 }
 
