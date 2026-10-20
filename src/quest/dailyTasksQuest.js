@@ -39,54 +39,50 @@ class DailyTasksQuest {
      * Guards against double-runs and respects the enable flag.
      */
     async doWork() {
-        const settings = await chrome.storage.sync.get({
-            enableDailyTasks:  false,
-            randomizeAnswers:  true,
-            dailyTaskDelay:    0        // minutes of extra random delay offset
-        });
-
-        if (!settings.enableDailyTasks) {
-            console.log('[DailyTasks] Disabled in settings, skipping.');
-            return;
-        }
-
-        this._randomizeAnswers = settings.randomizeAnswers !== false; // default true
-
-        // Guard: already ran today?
-        const today = new Date().toDateString();
-        const stored = await chrome.storage.local.get(['dailyTasksDate', 'dailyTasksDone']);
-        if (stored.dailyTasksDate === today && stored.dailyTasksDone) {
-            console.log('[DailyTasks] Already completed today, skipping.');
-            this._jobStatus_ = STATUS_DONE;
-            return;
-        }
-
-        // Guard: already running
         if (this._jobStatus_ === STATUS_BUSY) {
             console.log('[DailyTasks] Already running, skipping duplicate call.');
             return;
         }
-
-        // Optional random delay offset to make timing less predictable
-        const delayMinutes = settings.dailyTaskDelay || 0;
-        if (delayMinutes > 0) {
-            const jitter = Math.random() * delayMinutes * 60 * 1000;
-            console.log(`[DailyTasks] Waiting ${Math.round(jitter / 1000)}s before starting...`);
-            await this._sleep(jitter);
-        }
-
-        console.log('[DailyTasks] Starting daily tasks automation...');
         this._jobStatus_ = STATUS_BUSY;
-
+        this._completedToday = [];
+        this._failedToday = [];
         try {
+            const settings = await chrome.storage.sync.get({
+                enableDailyTasks: false,
+                randomizeAnswers: true,
+            });
+
+            if (!settings.enableDailyTasks) {
+                console.log('[DailyTasks] Disabled in settings, skipping.');
+                this._jobStatus_ = STATUS_NONE;
+                return;
+            }
+
+            this._randomizeAnswers = settings.randomizeAnswers !== false;
+
+            const today = getLocalDateKey();
+            const version = chrome.runtime.getManifest().version;
+            const stored = await chrome.storage.local.get(['dailyTasksDate', 'dailyTasksDone', 'dailyTasksVersion']);
+            if (isSameLocalDay(stored.dailyTasksDate) && stored.dailyTasksDone && stored.dailyTasksVersion === version) {
+                console.log('[DailyTasks] Already completed today, skipping.');
+                this._jobStatus_ = STATUS_DONE;
+                return;
+            }
+
+            console.log('[DailyTasks] Starting daily tasks automation...');
             await this._runAllActivities();
+            if (this._failedToday.length > 0) {
+                throw new Error(`${this._failedToday.length} daily task(s) could not be completed. Will retry.`);
+            }
 
             await chrome.storage.local.set({
                 dailyTasksDate: today,
                 dailyTasksDone: true,
+                dailyTasksVersion: version,
+                dailyTasksLastError: null,
                 dailyTasksLastRun: new Date().toISOString(),
                 dailyTasksCompleted: this._completedToday.length,
-                dailyTasksFailed:    this._failedToday.length
+                dailyTasksFailed: this._failedToday.length,
             });
 
             console.log(`[DailyTasks] Done. Completed: ${this._completedToday.length}, Failed: ${this._failedToday.length}`);
@@ -95,6 +91,12 @@ class DailyTasksQuest {
         } catch (err) {
             console.error('[DailyTasks] Fatal error:', err);
             this._jobStatus_ = STATUS_ERROR;
+            await chrome.storage.local.set({
+                dailyTasksDone: false,
+                dailyTasksLastError: err.message,
+                dailyTasksFailed: this._failedToday.length,
+            });
+            return {success: false, error: err.message};
         } finally {
             await this._closeActiveTab();
         }
@@ -108,12 +110,11 @@ class DailyTasksQuest {
 
         await this._waitMs(4000); // let the SPA fully render
 
-        // Fetch the list of pending activities from the page
         const activities = await this._getActivities(tabId);
         console.log(`[DailyTasks] Found ${activities.length} pending activities.`);
 
         if (activities.length === 0) {
-            console.log('[DailyTasks] No pending activities found – page may require login.');
+            console.log('[DailyTasks] No pending activities remain.');
             return;
         }
 
@@ -127,6 +128,14 @@ class DailyTasksQuest {
 
             try {
                 await this._completeActivity(activity);
+                let pending = true;
+                for (let attempt = 0; attempt < 3 && pending; attempt++) {
+                    await this._waitMs(2000);
+                    const remaining = await this._getActivities(tabId);
+                    pending = remaining.some((item) =>
+                        (activity.id && item.id === activity.id) || item.url === activity.url);
+                }
+                if (pending) throw new Error('Rewards has not confirmed completion of this activity.');
                 this._completedToday.push(activity.id || activity.title);
             } catch (err) {
                 console.warn(`[DailyTasks] Activity "${activity.title}" failed:`, err.message);
@@ -135,58 +144,41 @@ class DailyTasksQuest {
         }
     }
 
-    // ── Page scraping (runs inside the rewards hub tab) ───────────────────────
+    // ── Activities from the authenticated Rewards flyout ────────────────────
 
     async _getActivities(tabId) {
-        const result = await this._execInTab(tabId, () => {
-            const acts = [];
-
-            // Helper to push a card if not already completed
-            const pushCard = (el) => {
-                if (!el) return;
-                // Skip cards that show as completed (checked icon, "complete" class, full progress ring)
-                const isComplete =
-                    el.classList.contains('ds_card_complete') ||
-                    el.classList.contains('mee-icon-AddMedium') ||
-                    el.querySelector('.ds_punchcard_ctaImgComplete') !== null ||
-                    el.querySelector('[class*="complete"]') !== null;
-
-                if (isComplete) return;
-
-                const linkEl   = el.querySelector('a[href]');
-                const titleEl  = el.querySelector('.ds_card_sec_title, .c_card_title, .mee-card-header, h3, h4');
-                const pointsEl = el.querySelector('[class*="points"], .ds_punchcard_points, .mee-card-section-label');
-                const typeAttr = el.getAttribute('data-bi-id') || el.getAttribute('data-m') || '';
-
-                if (!linkEl) return;
-
-                acts.push({
-                    title:  (titleEl  && titleEl.textContent.trim())  || 'Unknown',
-                    url:    linkEl.href,
-                    points: (pointsEl && pointsEl.textContent.trim()) || '0',
-                    type:   typeAttr
-                });
-            };
-
-            // Daily-set cards
-            document.querySelectorAll('.ds_card:not(.ds_card_complete), .ds_completable')
-                    .forEach(pushCard);
-
-            // More-activities / punch-card / bonus cards
-            document.querySelectorAll(
-                '.mee-card, .c_card, [data-bi-id*="activity"], [class*="quest"]'
-            ).forEach(pushCard);
-
-            // Deduplicate by URL
-            const seen = new Set();
-            return acts.filter(a => {
-                if (seen.has(a.url)) return false;
-                seen.add(a.url);
-                return true;
+        const data = await new DailyRewardStatus().getUserStatusJson();
+        if (data.IsError || data.IsRewardsUser === false || !data.FlyoutResult) {
+            throw new Error('Sign in to Microsoft Rewards before running Daily Tasks.');
+        }
+        const flyout = data.FlyoutResult;
+        if (!Object.hasOwn(flyout, 'DailySetPromotions') || !Array.isArray(flyout.MorePromotions)) {
+            throw new Error('Rewards returned an unsupported daily activity response.');
+        }
+        const promotions = [...getDailySetPromotions(flyout), ...flyout.MorePromotions];
+        const seen = new Set();
+        const activities = [];
+        for (const promotion of promotions) {
+            const max = promotion.PointProgressMax;
+            if (promotion.Complete === true || promotion.Attributes?.complete === 'True' ||
+                (Number.isFinite(max) && promotion.PointProgress >= max)) continue;
+            const type = promotion.PromotionType || promotion.Attributes?.type || '';
+            if (!/quiz|poll|urlreward/i.test(type)) continue;
+            const destination = promotion.DestinationUrl || promotion.Attributes?.destination;
+            if (!destination) throw new Error('A pending daily activity has no destination URL.');
+            const url = new URL(destination, 'https://www.bing.com/').href;
+            if (!url.startsWith('https://')) throw new Error('Daily activity destination must use HTTPS.');
+            if (seen.has(url)) continue;
+            seen.add(url);
+            activities.push({
+                id: promotion.OfferId || promotion.Name || url,
+                title: promotion.Title || promotion.Name || 'Daily activity',
+                url,
+                points: max,
+                type,
             });
-        });
-
-        return result || [];
+        }
+        return activities;
     }
 
     // ── Single-activity dispatcher ────────────────────────────────────────────
@@ -198,10 +190,12 @@ class DailyTasksQuest {
 
         // Open the activity URL in the existing tab (reuse to look natural)
         await chrome.tabs.update(this._activeTabId, { url });
+        await this._waitForTab(this._activeTabId);
         await this._waitMs(4000); // let the activity page load
 
         // Detect the activity type from its URL / content
-        const actType = await this._detectActivityType(this._activeTabId, url);
+        const actType = /urlreward/i.test(activity.type || '') && !/quiz|poll/i.test(activity.type || '') ?
+            'openlink' : await this._detectActivityType(this._activeTabId, url);
         console.log(`[DailyTasks] Activity type detected: ${actType}`);
 
         switch (actType) {
@@ -225,7 +219,7 @@ class DailyTasksQuest {
             default:
                 // Unknown – try the generic multi-choice path as a best-effort
                 console.log('[DailyTasks] Unknown type, attempting generic quiz path...');
-                await this._completeMultiChoiceQuiz(this._activeTabId).catch(() => {});
+            await this._completeMultiChoiceQuiz(this._activeTabId);
                 break;
         }
 
@@ -271,6 +265,7 @@ class DailyTasksQuest {
             // Wait for an answer option to appear
             const optionsFound = await this._waitForElement(tabId, '[id^="rqAnswerOption"], .rqOption', 6000);
             if (!optionsFound) {
+                if (questionsSeen === 0) throw new Error('No quiz answer options were found.');
                 console.log('[DailyTasks] No more question options found, quiz may be complete.');
                 break;
             }
@@ -395,8 +390,7 @@ class DailyTasksQuest {
         }, this._randomizeAnswers);
 
         if (!clicked) {
-            console.warn('[DailyTasks] No poll options found.');
-            return;
+            throw new Error('No poll options were found.');
         }
 
         await this._waitMs(2000 + Math.random() * 1500);
@@ -437,24 +431,39 @@ class DailyTasksQuest {
     /** Open a new (non-active) tab and return it. */
     async _openTab(url) {
         const tab = await chrome.tabs.create({ url, active: false });
-        // Wait for the tab to finish loading
-        await new Promise((resolve) => {
+        this._activeTabId = tab.id;
+        await this._waitForTab(tab.id);
+        return tab.id;
+    }
+
+    async _waitForTab(id) {
+        await new Promise((resolve, reject) => {
+            const finish = (error) => {
+                chrome.tabs.onUpdated.removeListener(listener);
+                clearTimeout(timeout);
+                if (error) reject(error);
+                else resolve();
+            };
             const listener = (tabId, changeInfo) => {
-                if (tabId === tab.id && changeInfo.status === 'complete') {
-                    chrome.tabs.onUpdated.removeListener(listener);
-                    resolve();
+                if (tabId === id && changeInfo.status === 'complete') {
+                    finish();
                 }
             };
+            const timeout = setTimeout(() => finish(new Error('Daily Tasks page load timed out.')), 15000);
             chrome.tabs.onUpdated.addListener(listener);
-            // Safety timeout
-            setTimeout(resolve, 10000);
+            chrome.tabs.get(id).then((tab) => {
+                if (tab.status === 'complete') finish();
+            }).catch(finish);
         });
-        return tab;
     }
 
     async _closeActiveTab() {
         if (this._activeTabId !== null) {
-            try { await chrome.tabs.remove(this._activeTabId); } catch (_) {}
+            try {
+                await chrome.tabs.remove(this._activeTabId);
+            } catch (error) {
+                console.warn('[DailyTasks] Could not close task tab:', error.message);
+            }
             this._activeTabId = null;
         }
     }
@@ -476,7 +485,7 @@ class DailyTasksQuest {
             return results && results[0] ? results[0].result : null;
         } catch (err) {
             console.warn('[DailyTasks] executeScript error:', err.message);
-            return null;
+            throw err;
         }
     }
 

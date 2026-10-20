@@ -2,6 +2,34 @@
 # Troubleshooting
 There are several reasons why you see an unhappy red error icon. Here are some possible solutions.
 
+## After updating to 2.28.2.0
+
+Reload the existing unpacked extension at `edge://extensions` or
+`chrome://extensions`; no build or reinstall is needed. Reopen the popup after
+reloading. Confirm the displayed extension version is **2.28.2.0** and that it
+loads this repository's `src` folder.
+
+- **Manual start:** The popup displays startup progress or an error with a retry button. Sign in to Bing and Rewards if requested. A manual start overrides scheduled hours.
+- **Schedule:** Save the desired hours in Options. The browser must remain open; Chrome alarms restore due work after the background service worker restarts. An explicit Stop lasts until a manual restart or the next day.
+- **Daily Tasks:** Enable the feature in Options. It starts after a randomized delay and any configured additional offset, so it may not run immediately. Failed tasks are retried; visiting a page alone is not recorded as success unless Rewards confirms completion.
+- **No points awarded:** The displayed counters now come from Rewards, not estimates. Search attempts cannot guarantee credit. Check whether a manual Bing search advances the account's counters before attributing a remaining balance to the extension.
+
+Daily activity markup and Rewards eligibility can change independently of the
+extension. Unsupported activities and sign-in/API errors should remain visible
+as failures rather than falsely marking the day complete.
+
+### "Invalid Rewards point counter" when starting searches
+
+Version 2.28.1.0 incorrectly treated optional `ActivityAndQuiz` and Daily Set
+point totals as prerequisites for searching. Version 2.28.2.0 isolates those
+counter groups: valid search counters remain usable while unsupported activity
+totals produce a warning, not a fabricated zero or a search failure.
+
+Warnings in the service-worker console identify the counter group, entry index,
+and field types without logging full account data. Invalid PC/mobile search
+counters still stop searches because their remaining work cannot be determined
+reliably.
+
 ## General steps
 
 1. Click on the extension icon, wait for a few seconds and see if it resolves the issue.

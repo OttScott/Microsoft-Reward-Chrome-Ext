@@ -1,5 +1,32 @@
 # Changelog
 
+## Version 2.28.2.0
+
+- Fixed a 2.28.1.0 regression where an unsupported `ActivityAndQuiz` or Daily Set point counter blocked valid search counters and caused Retry searches to fail repeatedly.
+- Kept search-counter validation strict. Unsupported non-search totals are explicitly unavailable, with a popup warning and field-type diagnostics that exclude account/promotion identifiers.
+- Fixed the rewards-data message handler returning successful zero balances after status parsing failed. The popup now clears stale values and preserves unknown totals instead of converting them to zero.
+
+**Updating:** Reload the existing unpacked extension at `edge://extensions` and
+reopen the popup. No build or reinstall is needed.
+
+---
+
+## Version 2.28.1.0
+
+### Search, schedule, and Daily Tasks reliability
+- Fixed manual starts that failed on a read-only status property or silently skipped work because of schedule/cooldown gates. The popup now shows startup and failure messages.
+- Fixed PC-to-mobile transitions, cancellation during startup, signed-in search requests, and awaited user-agent rules for background fetches. Removed the static rule that sent an empty user agent.
+- Replaced simulated Rewards points with authenticated flyout counters. A successful HTTP request records an attempt, not earned points; bounded sessions stop even if Microsoft awards no credit.
+- Moved regular work, schedule transitions, midnight resets, and delayed Daily Tasks to Chrome alarms, with persisted recovery times and consistent local-day tracking.
+- Saved schedule changes now refresh background scheduling. Manual stops remain effective until a manual restart or the next day.
+- Fixed Daily Tasks tab IDs and failure handling. Tasks are discovered through Rewards promotions, completion is verified against Rewards, and failures remain retryable.
+
+**Updating:** No build is required. Reload the existing unpacked extension at
+`edge://extensions` (or `chrome://extensions`), then reopen its popup. Settings
+are retained. Daily Tasks must be enabled in Options.
+
+---
+
 ## Version 2.27.1.0 - December 3, 2025
 
 ### 🐛 **CRITICAL BUG FIXES: Race Condition Crashes**

@@ -35,10 +35,16 @@ class SearchQuest {
     }
 
     /**
-     * Resume searches that were paused by schedule
+     * Resume searches that were paused by schedule.
+     * @param {boolean} manual Whether the user explicitly requested a restart.
      */
-    resume() {
+    resume(manual = false) {
         console.log('Resuming SearchQuest from scheduled pause');
+        if (this._manuallyPaused && !manual) return;
+        if (manual) {
+            this._manuallyPaused = false;
+            this._forceStopped = false;
+        }
         
         // Clear the pause flag
         this._pausedBySchedule = false;
@@ -121,6 +127,7 @@ class SearchQuest {
         } catch (ex) {
             console.error('SearchQuest.doWork() failed with error:', ex);
             this._jobStatus_ = STATUS_ERROR;
+            await removeUA();
             if (ex instanceof UserAgentInvalidException) {
                 notifyUpdatedUAOutdated();
             }
@@ -152,22 +159,19 @@ class SearchQuest {
             await this._startSearchQuests();
             
             // Check if searches were successful
-            const flag = await this.isSearchSuccessful();
-            if (flag > 0) {
-                console.log('Search success check failed, getting alternative UA');
-                await this._getAlternativeUA(flag);
-            }
             
             console.log('Work loop completed successfully');
             
         } catch (error) {
             console.error('Error in search work loop:', error);
             this._jobStatus_ = STATUS_ERROR;
+            throw error;
         }
     }
 
     async _startSearchQuests() {
         console.log('_startSearchQuests() starting...');
+        if (this._jobStatus_ !== STATUS_BUSY) return;
         
         // Check if searches are already completed before starting
         if (this._status_.pcSearchStatus.isCompleted && 
@@ -183,6 +187,7 @@ class SearchQuest {
             interleaveSearches: false,
             smartSwitching: true
         });
+        if (this._jobStatus_ !== STATUS_BUSY) return;
 
         // Determine search strategy
         if (settings.interleaveSearches) {
@@ -198,22 +203,12 @@ class SearchQuest {
         
         console.log('_startSearchQuests() search strategies completed, checking for cleanup...');
         
-        // Add a small delay to ensure any async operations complete
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Only cleanup if no searches are currently running
-        if (this._jobStatus_ !== STATUS_BUSY) {
-            console.log('Safe to cleanup - no searches running');
-            this._quitSearchCleanUp();
-        } else {
-            console.log('Searches still running, deferring cleanup');
-            // The individual search functions will handle their own cleanup
-        }
+        await this._quitSearchCleanUp();
     }
 
     async _doSequentialSearches(settings) {
         // Original behavior: PC first, then mobile
-        if (!this._status_.pcSearchStatus.isCompleted) {
+        if (this._status_.pcSearchStatus.isValid !== false && !this._status_.pcSearchStatus.isCompleted) {
             console.log('Starting PC searches...');
             await this._doPcSearch();
             console.log('PC searches completed or stopped');
@@ -221,7 +216,8 @@ class SearchQuest {
             console.log('PC searches already completed, skipping');
         }
         
-        if (!settings.disableMobile && !this._status_.mbSearchStatus.isCompleted) {
+        if (this._jobStatus_ === STATUS_BUSY && !settings.disableMobile &&
+            this._status_.mbSearchStatus.isValid !== false && !this._status_.mbSearchStatus.isCompleted) {
             console.log('Starting mobile searches...');
             await this._doMbSearch();
             console.log('Mobile searches completed or stopped');
@@ -231,6 +227,7 @@ class SearchQuest {
     }
 
     async _doSmartSearches(settings) {
+        const attempted = new Set();
         // Smart switching: Check which search type can still earn points and do them in priority order
         let pcCanEarnPoints = !this._status_.pcSearchStatus.isCompleted && this._canEarnMorePoints('pc');
         let mbCanEarnPoints = !settings.disableMobile && !this._status_.mbSearchStatus.isCompleted && this._canEarnMorePoints('mb');
@@ -246,16 +243,19 @@ class SearchQuest {
         while ((pcCanEarnPoints || mbCanEarnPoints) && this._jobStatus_ === STATUS_BUSY) {
             // If PC is maxed out but mobile isn't, do mobile
             if (!pcCanEarnPoints && mbCanEarnPoints) {
+                attempted.add('mb');
                 console.log('PC searches maxed out, switching to mobile searches...');
                 await this._doMbSearch();
             }
             // If mobile is maxed out but PC isn't, do PC  
             else if (pcCanEarnPoints && !mbCanEarnPoints) {
+                attempted.add('pc');
                 console.log('Mobile searches maxed out, switching to PC searches...');
                 await this._doPcSearch();
             }
             // If both can earn points, prioritize PC first (traditional order)
             else if (pcCanEarnPoints && mbCanEarnPoints) {
+                attempted.add('pc');
                 console.log('Both search types can earn points, doing PC searches first...');
                 await this._doPcSearch();
                 
@@ -290,6 +290,7 @@ class SearchQuest {
                 });
                 
                 if (mbCanEarnPoints && this._jobStatus_ === STATUS_BUSY) {
+                    attempted.add('mb');
                     console.log('PC completed, now doing mobile searches...');
                     await this._doMbSearch();
                 } else {
@@ -304,8 +305,8 @@ class SearchQuest {
             if (this._status_ && typeof this._status_.update === 'function') {
                 await this._status_.update();
             }
-            pcCanEarnPoints = !this._status_.pcSearchStatus.isCompleted && this._canEarnMorePoints('pc');
-            mbCanEarnPoints = !settings.disableMobile && !this._status_.mbSearchStatus.isCompleted && this._canEarnMorePoints('mb');
+            pcCanEarnPoints = !attempted.has('pc') && !this._status_.pcSearchStatus.isCompleted && this._canEarnMorePoints('pc');
+            mbCanEarnPoints = !attempted.has('mb') && !settings.disableMobile && !this._status_.mbSearchStatus.isCompleted && this._canEarnMorePoints('mb');
             
             console.log('Re-evaluated search needs:', {
                 pcCanEarn: pcCanEarnPoints,
@@ -325,8 +326,8 @@ class SearchQuest {
 
     async _doInterleavedSearches(settings) {
         // Interleaved approach: alternate between PC and mobile searches
-        const pcNeeded = !this._status_.pcSearchStatus.isCompleted;
-        const mbNeeded = !settings.disableMobile && !this._status_.mbSearchStatus.isCompleted;
+        const pcNeeded = this._status_.pcSearchStatus.isValid && !this._status_.pcSearchStatus.isCompleted;
+        const mbNeeded = !settings.disableMobile && this._status_.mbSearchStatus.isValid && !this._status_.mbSearchStatus.isCompleted;
         
         if (!pcNeeded && !mbNeeded) {
             console.log('No searches needed');
@@ -350,14 +351,19 @@ class SearchQuest {
             return;
         }
 
+        const remaining = {
+            pc: pcNeeded ? Math.min(this._calculateSearchCount(), this._status_.pcSearchStatus.searchNeededCount) : 0,
+            mb: mbNeeded ? Math.min(this._calculateSearchCount(), this._status_.mbSearchStatus.searchNeededCount) : 0,
+        };
+
         // Interleave the searches
         let currentTypeIndex = 0;
         const maxIterations = 100; // Safety limit
         let iterations = 0;
         
-        while ((pcNeeded && !this._status_.pcSearchStatus.isCompleted) || 
-               (mbNeeded && !this._status_.mbSearchStatus.isCompleted)) {
-            
+        while (this._jobStatus_ === STATUS_BUSY &&
+               ((remaining.pc > 0 && !this._status_.pcSearchStatus.isCompleted) ||
+               (remaining.mb > 0 && !this._status_.mbSearchStatus.isCompleted))) {
             if (iterations++ > maxIterations) {
                 console.warn('Interleaved search safety limit reached');
                 break;
@@ -366,14 +372,14 @@ class SearchQuest {
             const currentSearchType = searchTypes[currentTypeIndex % searchTypes.length];
             
             // Generate random batch size between 3-8 searches for variety
-            const batchSize = Math.floor(Math.random() * 6) + 3; // Random between 3-8
+            const batchSize = Math.min(remaining[currentSearchType], Math.floor(Math.random() * 6) + 3);
             
-            if (currentSearchType === 'pc' && !this._status_.pcSearchStatus.isCompleted) {
+            if (batchSize > 0 && currentSearchType === 'pc' && !this._status_.pcSearchStatus.isCompleted) {
                 console.log(`Interleaved search: Performing PC search batch (${batchSize} searches)...`);
-                await this._doLimitedPcSearch(batchSize);
-            } else if (currentSearchType === 'mb' && !this._status_.mbSearchStatus.isCompleted) {
+                remaining.pc -= await this._doLimitedPcSearch(batchSize);
+            } else if (batchSize > 0 && currentSearchType === 'mb' && !this._status_.mbSearchStatus.isCompleted) {
                 console.log(`Interleaved search: Performing mobile search batch (${batchSize} searches)...`);
-                await this._doLimitedMbSearch(batchSize);
+                remaining.mb -= await this._doLimitedMbSearch(batchSize);
             }
             
             // Update status to check completion
@@ -689,13 +695,13 @@ class SearchQuest {
         }
 
         console.log('Initiating PC search session...');
-        this._initiateSearch();
         if (this._currentSearchType_ != SEARCH_TYPE_PC_SEARCH) {
-            this._preparePCSearch();
+            await this._preparePCSearch();
         }
         
         // Load any saved progress
         await this._loadSearchProgress();
+        await this._initiateSearch();
         console.log(`PC search starting with ${this._currentSearchCount_} searches already completed`);
 
         await this._requestBingSearch();
@@ -742,13 +748,13 @@ class SearchQuest {
         }
 
         console.log('Initiating mobile search session...');
-        this._initiateSearch();
         if (this._currentSearchType_ != SEARCH_TYPE_MB_SEARCH) {
-            this._prepareMbSearch();
+            await this._prepareMbSearch();
         }
         
         // Load any saved progress
         await this._loadSearchProgress();
+        await this._initiateSearch();
         console.log(`Mobile search starting with ${this._currentSearchCount_} searches already completed`);
 
         await this._requestBingSearch();
@@ -784,13 +790,13 @@ class SearchQuest {
         }
 
         console.log('Initiating limited PC search session...');
-        this._initiateSearch();
         if (this._currentSearchType_ != SEARCH_TYPE_PC_SEARCH) {
-            this._preparePCSearch();
+            await this._preparePCSearch();
         }
         
         // Load any saved progress
         await this._loadSearchProgress();
+        await this._initiateSearch();
         const startingCount = this._currentSearchCount_;
         console.log(`Limited PC search starting with ${this._currentSearchCount_} searches already completed`);
 
@@ -806,6 +812,7 @@ class SearchQuest {
         
         const searchesPerformed = this._currentSearchCount_ - startingCount;
         console.log(`_doLimitedPcSearch() completed - performed ${searchesPerformed} searches`);
+        return searchesPerformed;
     }
 
     async _doLimitedMbSearch(maxSearches) {
@@ -824,13 +831,13 @@ class SearchQuest {
         }
 
         console.log('Initiating limited mobile search session...');
-        this._initiateSearch();
         if (this._currentSearchType_ != SEARCH_TYPE_MB_SEARCH) {
-            this._prepareMbSearch();
+            await this._prepareMbSearch();
         }
         
         // Load any saved progress
         await this._loadSearchProgress();
+        await this._initiateSearch();
         const startingCount = this._currentSearchCount_;
         console.log(`Limited mobile search starting with ${this._currentSearchCount_} searches already completed`);
 
@@ -846,13 +853,14 @@ class SearchQuest {
         
         const searchesPerformed = this._currentSearchCount_ - startingCount;
         console.log(`_doLimitedMbSearch() completed - performed ${searchesPerformed} searches`);
+        return searchesPerformed;
     }
 
     async _initiateSearch() {
-        this._currentSearchCount_ = 0;
-        
-        // Recalculate target count for the day - don't reuse existing one
-        this._targetSearchCount = this._calculateSearchCount();
+        const status = this._currentSearchType_ === SEARCH_TYPE_PC_SEARCH ?
+            this._status_.pcSearchStatus : this._status_.mbSearchStatus;
+        this._targetSearchCount = this._currentSearchCount_ +
+            Math.min(this._calculateSearchCount(), status.searchNeededCount);
         
         // Calculate total search time
         const totalSearchTime = this._targetSearchCount * this._searchIntervalMS;
@@ -910,35 +918,21 @@ class SearchQuest {
         });
     }
 
-    _preparePCSearch() {
+    async _preparePCSearch() {
         this._currentSearchType_ = SEARCH_TYPE_PC_SEARCH;
-        removeUA();
-        setPCReqHeaders();
+        await setPCReqHeaders();
     }
 
-    _prepareMbSearch() {
+    async _prepareMbSearch() {
         this._currentSearchType_ = SEARCH_TYPE_MB_SEARCH;
-        removeUA();
-        try {
-            // Validate mobile UA first
-            if (!userAgents || !userAgents.mb || typeof userAgents.mb !== 'string' || userAgents.mb.length < 20) {
-                console.error('Invalid mobile UA before setting headers:', userAgents?.mb);
-                this._applyFallbackUserAgents(2).then(() => {
-                    console.log('Applied fallback mobile UA before setting headers');
-                }).catch(err => {
-                    console.error('Failed to apply fallback mobile UA:', err);
-                });
-            }
-            setMobileReqHeaders();
-        } catch (err) {
-            console.error('Error in prepareMbSearch:', err);
-            // Try to recover by using fallback UA
-            this._applyFallbackUserAgents(2);
-            setMobileReqHeaders();
+        if (!userAgents || !userAgents.mb || typeof userAgents.mb !== 'string' || userAgents.mb.length < 20) {
+            console.warn('Invalid mobile UA before setting headers; loading fallback.');
+            await this._applyFallbackUserAgents(2);
         }
+        await setMobileReqHeaders();
     }
 
-    _quitSearchCleanUp() {
+    async _quitSearchCleanUp() {
         console.log('_quitSearchCleanUp() called, current status:', this._jobStatus_);
         
         // Only set to DONE if searches are truly finished and we were busy
@@ -969,11 +963,12 @@ class SearchQuest {
             console.log('Skipping search type clear - searches may still be running');
         }
         
-        removeUA();
+        await removeUA();
         console.log('Search cleanup completed, final status:', this._jobStatus_);
     }
 
     async _requestBingSearch() {
+        if (this._jobStatus_ !== STATUS_BUSY) return;
         // FIXED BUG: Always initialize the status if needed
         if (this._currentSearchType_ === null || this._currentSearchType_ === undefined) {
             console.warn('Search type not initialized, determining appropriate type...');
@@ -985,31 +980,27 @@ class SearchQuest {
             if (!pcCompleted) {
                 console.log('Starting with PC search');
                 this._currentSearchType_ = 0; // SEARCH_TYPE_PC_SEARCH
-                removeUA();
-                setPCReqHeaders();
+                await setPCReqHeaders();
             } else if (!mbCompleted) {
                 console.log('Starting with Mobile search');
                 this._currentSearchType_ = 1; // SEARCH_TYPE_MB_SEARCH
-                removeUA();
-                setMbReqHeaders();
+                await setMobileReqHeaders();
             } else {
                 console.warn('Both search types appear completed, defaulting to PC search');
                 this._currentSearchType_ = 0; // SEARCH_TYPE_PC_SEARCH
-                removeUA();
-                setPCReqHeaders();
+                await setPCReqHeaders();
             }
             
             console.log('Search type initialized to:', this._currentSearchType_);
         }
         
-        this._jobStatus_ = STATUS_BUSY;
         const searchType = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'PC' : 'Mobile';
         const sessionStartCount = this._currentSearchCount_; // Remember starting count for session
         
         try {
             // Main search loop - iterative instead of recursive
             let loopCounter = 0;
-            const MAX_LOOP_ITERATIONS = 50; // Prevent infinite loops
+            const MAX_LOOP_ITERATIONS = 100;
             
             while (!this._isCurrentSearchCompleted() && this._jobStatus_ === STATUS_BUSY) {
                 
@@ -1017,15 +1008,7 @@ class SearchQuest {
                 loopCounter++;
                 if (loopCounter > MAX_LOOP_ITERATIONS) {
                     console.error(`Search loop exceeded ${MAX_LOOP_ITERATIONS} iterations, stopping to prevent infinite loop`);
-                    this._jobStatus_ = STATUS_DONE;
-                    break;
-                }
-                
-                // CIRCUIT BREAKER: Check for excessive search count regardless of other conditions
-                if (this._currentSearchCount_ > 100) {
-                    console.error(`Search count ${this._currentSearchCount_} is excessive, stopping to prevent infinite loop`);
-                    this._jobStatus_ = STATUS_DONE;
-                    break;
+                    throw new Error('Search session exceeded its safety limit.');
                 }
                 
                 // Debug: Log loop entry conditions
@@ -1042,13 +1025,11 @@ class SearchQuest {
                     if (!pcCompleted) {
                         console.log('Restoring PC search type');
                         this._currentSearchType_ = 0; // SEARCH_TYPE_PC_SEARCH
-                        removeUA();
-                        setPCReqHeaders();
+                        await setPCReqHeaders();
                     } else if (!mbCompleted) {
                         console.log('Restoring Mobile search type');
                         this._currentSearchType_ = 1; // SEARCH_TYPE_MB_SEARCH
-                        removeUA();
-                        setMbReqHeaders();
+                        await setMobileReqHeaders();
                     } else {
                         console.error('Both search types completed but loop still running, stopping to prevent infinite loop');
                         this._jobStatus_ = STATUS_DONE;
@@ -1077,8 +1058,9 @@ class SearchQuest {
                 const searchResult = await this._performSingleSearch(searchType);
                 
                 if (!searchResult.success) {
+                    if (searchResult.cancelled) break;
                     console.error('Single search failed:', searchResult.error);
-                    break;
+                    throw searchResult.error;
                 }
                 
                 // Debug: Log post-search status
@@ -1109,27 +1091,10 @@ class SearchQuest {
             
             console.log(`Search session ended. Completed: ${this._currentSearchCount_}/${this._getCurrentMaxSearches()}`);
             
-            // Set job status to done when loop completes normally
-            if (this._jobStatus_ === STATUS_BUSY) {
-                this._jobStatus_ = STATUS_DONE;
-                console.log('Search session completed normally, status set to DONE');
-            }
-            
-            // Update status to mark this search type as completed if we reached the target
+            // Refresh server counters without assuming that attempts earned points.
             if (this._isCurrentSearchCompleted()) {
                 try {
-                    console.log(`Marking ${searchType} searches as completed in status`);
-                    
-                    // Mark the specific search type as completed
-                    if (this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH && this._status_.pcSearchStatus) {
-                        this._status_.pcSearchStatus.isCompleted = true;
-                        console.log('PC search marked as completed');
-                    } else if (this._currentSearchType_ == SEARCH_TYPE_MB_SEARCH && this._status_.mbSearchStatus) {
-                        this._status_.mbSearchStatus.isCompleted = true;
-                        console.log('Mobile search marked as completed');
-                    }
-                    
-                    console.log('Updating status after marking completion');
+                    console.log(`Refreshing ${searchType} status after the session`);
                     await this._status_.update();
                 } catch (error) {
                     console.error('Failed to update status after search completion:', error);
@@ -1139,11 +1104,12 @@ class SearchQuest {
         } catch (error) {
             console.error('Critical error in search loop:', error);
             this._jobStatus_ = STATUS_ERROR;
+            throw error;
         } finally {
             // Ensure proper cleanup when this specific search session ends
             if (this._jobStatus_ !== STATUS_BUSY) {
                 console.log('_requestBingSearch session ended, performing local cleanup');
-                removeUA(); // Clean up user agent
+                await removeUA();
                 
                 // Don't clear search type here as other searches might still be running
                 // Let the main cleanup handle that
@@ -1152,13 +1118,13 @@ class SearchQuest {
     }
 
     async _requestLimitedBingSearch(maxSearches) {
+        if (this._jobStatus_ !== STATUS_BUSY) return;
         // FIXED BUG: Always initialize the status if needed
         if (this._currentSearchType_ === null || this._currentSearchType_ === undefined) {
             console.warn('Search type not initialized, defaulting to PC search');
-            this._preparePCSearch();
+            await this._preparePCSearch();
         }
         
-        this._jobStatus_ = STATUS_BUSY;
         const searchType = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'PC' : 'Mobile';
         const startingCount = this._currentSearchCount_;
         const sessionStartCount = this._currentSearchCount_; // Remember starting count for session
@@ -1182,8 +1148,9 @@ class SearchQuest {
                 const searchResult = await this._performSingleSearch(searchType);
                 
                 if (!searchResult.success) {
+                    if (searchResult.cancelled) break;
                     console.error('Single search failed:', searchResult.error);
-                    break;
+                    throw searchResult.error;
                 }
                 
                 // Check if we should continue
@@ -1231,6 +1198,7 @@ class SearchQuest {
         } catch (error) {
             console.error('Critical error in limited search loop:', error);
             this._jobStatus_ = STATUS_ERROR;
+            throw error;
         }
     }
     
@@ -1239,7 +1207,7 @@ class SearchQuest {
         let retries = 0;
         let waitTime = 30000;
         
-        while (retries <= MAX_RETRIES) {
+        while (this._jobStatus_ === STATUS_BUSY && retries <= MAX_RETRIES) {
             try {
                 // Check connectivity
                 const isConnected = await checkInternetConnectivity();
@@ -1260,6 +1228,7 @@ class SearchQuest {
                 
                 // Notify that search is starting
                 await this._notifySearchStarting(searchType, searchWord);
+                if (this._jobStatus_ !== STATUS_BUSY) return {success: false, cancelled: true};
                 
                 // Perform the search with mobile-specific adaptations
                 const searchUrl = this._buildSearchUrl(searchWord, searchType);
@@ -1267,8 +1236,10 @@ class SearchQuest {
                 
                 const response = await fetch(searchUrl, {
                     method: 'GET',
-                    headers: searchHeaders
+                    headers: searchHeaders,
+                    credentials: 'include',
                 });
+                if (this._jobStatus_ !== STATUS_BUSY) return {success: false, cancelled: true};
                 
                 if (response.status != 200) {
                     throw new FetchResponseAnomalyException('Search');
@@ -1297,7 +1268,8 @@ class SearchQuest {
             }
         }
         
-        return { success: false, error: 'Max retries exceeded' };
+        if (this._jobStatus_ !== STATUS_BUSY) return {success: false, cancelled: true};
+        return {success: false, error: new Error('Max search retries exceeded')};
     }
     
     async _updateSearchProgress(searchWord) {
@@ -1327,6 +1299,7 @@ class SearchQuest {
     }
     
     async _waitBetweenSearches() {
+        if (this._jobStatus_ !== STATUS_BUSY || !this._nextSearchTime) return;
         const startTime = Date.now();
         const originalNextSearchTime = this._nextSearchTime.getTime();
         this._jobStatus_ = STATUS_BUSY; // Ensure we stay busy during wait
@@ -1357,6 +1330,7 @@ class SearchQuest {
         
         // Start sending periodic updates and checking for force action
         progressTimer = setInterval(() => {
+            if (this._jobStatus_ !== STATUS_BUSY || !this._nextSearchTime) return;
             // CRITICAL: Don't process force actions if searches are already completed
             if (this._isCurrentSearchCompleted()) {
                 console.log('Searches completed - skipping force action check');
@@ -1385,7 +1359,8 @@ class SearchQuest {
         
         try {
             // Wait until the scheduled time, but check periodically for force action
-            while (Date.now() < this._nextSearchTime.getTime() && this._jobStatus_ === STATUS_BUSY && !forceTriggered) {
+            while (this._jobStatus_ === STATUS_BUSY && this._nextSearchTime &&
+                Date.now() < this._nextSearchTime.getTime() && !forceTriggered) {
                 // CRITICAL: Exit wait immediately if searches are completed
                 if (this._isCurrentSearchCompleted()) {
                     console.log('Searches completed during wait - ending wait immediately');
@@ -1518,14 +1493,9 @@ class SearchQuest {
                 dailyPointsEarned: 0
             });
             
-            // Calculate points earned from this search
-            const pointsPerSearch = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 5 : 5; // Assuming 5 points per search
-            const searchPoints = pointsPerSearch;
-            
             // Update the appropriate counter
             const updatedData = {
                 lastSearchTime: Date.now(),
-                dailyPointsEarned: data.dailyPointsEarned + searchPoints,
                 searchesUpdatedOn: new Date().toISOString()
             };
             
@@ -1536,7 +1506,7 @@ class SearchQuest {
             }
             
             await chrome.storage.local.set(updatedData);
-            debugLog(`Saved search progress: ${searchType} = ${this._currentSearchCount_} | Points: ${data.dailyPointsEarned + searchPoints}`, LOG_LEVELS.INFO);
+            debugLog(`Saved search attempts: ${searchType} = ${this._currentSearchCount_}`, LOG_LEVELS.INFO);
         } catch (error) {
             console.error('Failed to save search progress:', error);
         }
@@ -1692,47 +1662,16 @@ class SearchQuest {
             final: searchCount
         });
         
-        return searchCount;
+        return Math.max(1, Math.min(100, searchCount));
     }
 
     _getCurrentMaxSearches() {
-        // Priority 1: Use status-based count as primary source (what Microsoft actually needs)
-        if (this._status_ && this._currentSearchType_) {
-            const statusCount = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 
-                this._status_.pcSearchStatus?.searchNeededCount : 
-                this._status_.mbSearchStatus?.searchNeededCount;
-                
-            if (statusCount && statusCount > 0) {
-                console.log(`Using status-based search count: ${statusCount}`);
-                return statusCount;
-            }
-        }
-        
-        // Priority 2: Use stored target count as secondary source
-        if (this._targetSearchCount && this._targetSearchCount > 0) {
-            // Only log this occasionally to prevent spam
-            if (!this._lastTargetCountLog || Date.now() - this._lastTargetCountLog > 60000) {
-                console.log(`Using calculated target count: ${this._targetSearchCount}`);
-                this._lastTargetCountLog = Date.now();
-            }
+        if (Number.isFinite(this._targetSearchCount)) {
             return this._targetSearchCount;
         }
-        
-        // Priority 3: Final fallback to reasonable defaults
-        const defaultCount = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 30 : 20;
-        
-        // Only log warning once per session
-        if (!this._fallbackWarningLogged) {
-            console.warn('Using fallback search count:', {
-                searchType: this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'PC' : 'Mobile',
-                targetCount: this._targetSearchCount,
-                statusAvailable: !!this._status_,
-                usingDefault: defaultCount
-            });
-            this._fallbackWarningLogged = true;
-        }
-        
-        return defaultCount;
+        const status = this._currentSearchType_ === SEARCH_TYPE_PC_SEARCH ?
+            this._status_?.pcSearchStatus : this._status_?.mbSearchStatus;
+        return this._currentSearchCount_ + (status?.searchNeededCount || 0);
     }
 
     _getBingSearchUrl() {
@@ -1744,84 +1683,13 @@ class SearchQuest {
     }
 
     _isCurrentSearchCompleted() {
-        // Get current progress first - this is essential for circuit breaker logic
-        const currentProgress = this._currentSearchCount_;
-        
-        // CIRCUIT BREAKER: If search count is clearly excessive, force completion
-        // This prevents infinite loops when other logic fails
-        if (currentProgress > 100) {
-            console.warn(`Search count ${currentProgress} is excessive, forcing completion to prevent infinite loop`);
-            return true;
-        }
-        
-        // Enhanced validation and initialization check
         if (this._currentSearchType_ === null || this._currentSearchType_ === undefined) {
-            // Only log this warning occasionally to prevent log spam
-            if (!this._lastSearchTypeWarning || Date.now() - this._lastSearchTypeWarning > 10000) {
-                console.warn('Search type not initialized in completion check');
-                this._lastSearchTypeWarning = Date.now();
-            }
-            
-            // CIRCUIT BREAKER: If we have a reasonable search count but no type, assume completion
-            if (currentProgress >= 20) {
-                console.warn(`Search type lost but count ${currentProgress} suggests completion, marking as done`);
-                return true;
-            }
             return false;
         }
-        
-        if (!this._status_) {
-            console.warn('Status not available in completion check');
-            
-            // CIRCUIT BREAKER: Use basic count logic when status is unavailable
-            const defaultNeeded = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 30 : 20;
-            if (currentProgress >= defaultNeeded) {
-                console.warn(`Status unavailable but count ${currentProgress} >= ${defaultNeeded}, assuming completion`);
-                return true;
-            }
-            return false;
-        }
-
-        const type = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 'PC' : 'Mobile';
-        const status = this._currentSearchType_ == SEARCH_TYPE_PC_SEARCH ? 
-            this._status_.pcSearchStatus : 
-            this._status_.mbSearchStatus;
-            
-        if (!status) {
-            console.warn(`No ${type} status available for completion check`);
-            
-            // CIRCUIT BREAKER: Use type-based default logic
-            const defaultNeeded = type === 'PC' ? 30 : 20;
-            if (currentProgress >= defaultNeeded) {
-                console.warn(`Status unavailable but count ${currentProgress} >= ${defaultNeeded} for ${type}, assuming completion`);
-                return true;
-            }
-            return false;
-        }
-            
-        // First check if the search type is already marked as completed
-        if (status.isCompleted) {
-            console.log(`${type} searches already completed according to status`);
-            return true;
-        }
-        
-        // Get the target search count with proper priority (match _getCurrentMaxSearches logic)
-        let neededCount = 0;
-        
-        // Priority 1: Use status searchNeededCount (what Microsoft actually needs)
-        if (status.searchNeededCount && status.searchNeededCount > 0) {
-            neededCount = status.searchNeededCount;
-        }
-        // Priority 2: Use the stored target count if available
-        else if (this._targetSearchCount && this._targetSearchCount > 0) {
-            neededCount = this._targetSearchCount;
-        }
-        // Priority 3: Use reasonable defaults
-        else {
-            neededCount = type === 'PC' ? 30 : 20;
-        }
-
-        return currentProgress >= neededCount;
+        const status = this._currentSearchType_ === SEARCH_TYPE_PC_SEARCH ?
+            this._status_?.pcSearchStatus : this._status_?.mbSearchStatus;
+        return !!status && (status.isCompleted || status.isValid === false ||
+            (Number.isFinite(this._targetSearchCount) && this._currentSearchCount_ >= this._targetSearchCount));
     }
 
     getSearchProgress() {
@@ -2093,7 +1961,7 @@ class SearchQuest {
     }
 
     // Add method to force stop search activities (for scheduling)
-    async forceStop() {
+    async forceStop(reason = 'manualStop') {
         console.log('Force stopping search quest due to schedule pause');
         // Store current progress before stopping
         try {
@@ -2141,29 +2009,29 @@ class SearchQuest {
             throw error;
         }
         
-        chrome.storage.local.set({
+        await chrome.storage.local.set({
             'searchPausedAt': new Date().toISOString(),
             'pausedSearchCount': this._currentSearchCount_,
             'pausedSearchType': currentSearchType == SEARCH_TYPE_PC_SEARCH ? 'pc' : 'mb',
-            'searchPausedReason': 'manualStop'
+            'searchPausedReason': reason,
         });
         // Set flag to indicate this was paused manually
-        this._pausedBySchedule = false;
-        this._manuallyPaused = true;
+        this._pausedBySchedule = reason === 'schedule';
+        this._manuallyPaused = reason === 'manualStop';
         console.log('Search quest successfully stopped');
         return true;
     }
 }
 
 function removeUA() {
-    // Updated for Manifest V3
     debugLog('Removing UA headers');
+    return chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds: [1]});
 }
 
 function setPCReqHeaders() {
     // Updated for Manifest V3
     debugLog('Setting PC headers:', userAgents.pc);
-    chrome.declarativeNetRequest.updateDynamicRules({
+    return chrome.declarativeNetRequest.updateDynamicRules({
         removeRuleIds: [1],
         addRules: [{
             "id": 1,
@@ -2176,7 +2044,7 @@ function setPCReqHeaders() {
             },
             "condition": {
                 "urlFilter": "bing.com/search",
-                "resourceTypes": ["main_frame"]
+                'resourceTypes': ['main_frame', 'xmlhttprequest'],
             }
         }]
     });
@@ -2185,7 +2053,7 @@ function setPCReqHeaders() {
 function setMobileReqHeaders() {
     // Updated for Manifest V3
     debugLog('Setting mobile headers:', userAgents.mb);
-    chrome.declarativeNetRequest.updateDynamicRules({
+    return chrome.declarativeNetRequest.updateDynamicRules({
         removeRuleIds: [1],
         addRules: [{
             "id": 1,
@@ -2198,7 +2066,7 @@ function setMobileReqHeaders() {
             },
             "condition": {
                 "urlFilter": "bing.com/search",
-                "resourceTypes": ["main_frame"]
+                'resourceTypes': ['main_frame', 'xmlhttprequest'],
             }
         }]
     });

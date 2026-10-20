@@ -72,6 +72,7 @@ function requestRewardsData() {
             updateStatsDisplay(response);
         } else {
             console.warn('Failed to get rewards data:', response);
+            showStatsError();
             // Try again after a delay if failed
             setTimeout(requestRewardsData, 3000);
         }
@@ -95,11 +96,17 @@ function updateStatsDisplay(response) {
         showStatsError();
         return;
     }
+
+    const warning = document.getElementById('rewards-status-warning');
+    if (warning) {
+        warning.textContent = data.warning || '';
+        warning.style.display = data.warning ? 'block' : 'none';
+    }
     
     // Update points earned today
     const todayEarnings = document.getElementById('today-earnings');
     if (todayEarnings) {
-        todayEarnings.textContent = data.earnedToday !== undefined ? data.earnedToday : '--';
+        todayEarnings.textContent = data.earnedToday ?? '--';
         // Add a visual indicator that the value was updated
         flashElement(todayEarnings);
     }
@@ -107,7 +114,7 @@ function updateStatsDisplay(response) {
     // Update points remaining
     const remainingPoints = document.getElementById('remaining-points');
     if (remainingPoints) {
-        remainingPoints.textContent = data.remainingPoints !== undefined ? data.remainingPoints : '--';
+        remainingPoints.textContent = data.remainingPoints ?? '--';
         flashElement(remainingPoints);
     }
     
@@ -155,6 +162,11 @@ function showStatsError() {
     if (remainingPoints) remainingPoints.textContent = errorText;
     if (searchCompleted) searchCompleted.textContent = errorText;
     if (searchTotal) searchTotal.textContent = errorText;
+    const warning = document.getElementById('rewards-status-warning');
+    if (warning) {
+        warning.textContent = 'Rewards status is unavailable. Check sign-in and retry searches.';
+        warning.style.display = 'block';
+    }
 }
 
 // Add a visual feedback function to show when values update
@@ -271,6 +283,14 @@ function updateSearchStatusImmediate(response) {
     try {
         if (!response) {
             console.warn('No response data for search status update');
+            return;
+        }
+        if (response.error) {
+            showSearchMessage(response.error, true);
+            return;
+        }
+        if (response.starting) {
+            showSearchMessage('Starting searches and checking Rewards...');
             return;
         }
 
@@ -710,6 +730,39 @@ function requestNextScheduledTime() {
     });
 }
 
+function showSearchMessage(message, isError = false) {
+    let status = document.getElementById('search-status');
+    if (!status) {
+        status = document.createElement('div');
+        status.id = 'search-status';
+        document.body.prepend(status);
+    }
+    status.replaceChildren();
+    const text = document.createElement('div');
+    text.textContent = message;
+    if (isError) text.setAttribute('role', 'alert');
+    status.appendChild(text);
+    status.style.display = 'block';
+    if (isError) {
+        const retry = document.createElement('button');
+        retry.textContent = 'Retry searches';
+        retry.className = 'action-button';
+        retry.addEventListener('click', startSearchesNow);
+        status.appendChild(retry);
+    }
+}
+
+function startSearchesNow() {
+    showSearchMessage('Starting searches and checking Rewards...');
+    chrome.runtime.sendMessage({action: 'startSearches'}, (response) => {
+        if (chrome.runtime.lastError || !response?.success) {
+            showSearchMessage(chrome.runtime.lastError?.message || response?.error || 'The extension did not accept the search request.', true);
+            return;
+        }
+        requestSearchProgress();
+    });
+}
+
 // Add function to update schedule display
 function updateScheduleDisplay(response) {
     const scheduleElement = document.getElementById('next-schedule');
@@ -735,18 +788,7 @@ function updateScheduleDisplay(response) {
             // Add event listener to the button
             const startButton = document.getElementById('start-searches-now');
             if (startButton) {
-                startButton.addEventListener('click', () => {
-                    chrome.runtime.sendMessage({
-                        action: 'startSearches'
-                    }, response => {
-                        if (response && response.success) {
-                            startButton.textContent = 'Starting...';
-                            startButton.disabled = true;
-                            // Refresh search status after a delay
-                            setTimeout(requestSearchProgress, 2000);
-                        }
-                    });
-                });
+                startButton.addEventListener('click', startSearchesNow);
             }
         } else {
             scheduleElement.innerHTML = 'Searches should be starting soon...';
@@ -757,18 +799,7 @@ function updateScheduleDisplay(response) {
         // Add event listener to the button
         const startButton = document.getElementById('start-searches-now');
         if (startButton) {
-            startButton.addEventListener('click', () => {
-                chrome.runtime.sendMessage({
-                    action: 'startSearches'
-                }, response => {
-                    if (response && response.success) {
-                        startButton.textContent = 'Starting...';
-                        startButton.disabled = true;
-                        // Refresh search status after a delay
-                        setTimeout(requestSearchProgress, 2000);
-                    }
-                });
-            });
+            startButton.addEventListener('click', startSearchesNow);
         }
     }
 }

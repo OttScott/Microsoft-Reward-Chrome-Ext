@@ -14,6 +14,10 @@ let scheduleWakeUpTimer = null; // For scheduled start time wake-ups
 let nextScheduledTime = null; // Store next scheduled time
 let connectivityResolveTimer = null; // Timer for connectivity resolution
 let isSchedulePaused = false; // Track if we're currently paused by schedule
+let backgroundWorkPromise = null;
+let extensionLoadStarted = false;
+let initializationPromise = null;
+let manualStartActive = false;
 
 // Initialize core objects
 let googleTrend = new GoogleTrend();
@@ -24,21 +28,45 @@ let dailyTasksQuest = new DailyTasksQuest();
 
 console.log('Background script loading - ' + new Date().toISOString());
 
-// Add a variable to track when the extension was started
-let extensionStartTime = Date.now();
-// Minimum time (in ms) before we consider allowing the badge to turn green
-const MIN_RUNTIME_BEFORE_DONE = 60000; // 1 minute
-
 // Chrome alarm listener for persistent morning startup (survives service worker restarts)
 chrome.alarms.onAlarm.addListener(async (alarm) => {
     console.log(`🔔 Alarm triggered: ${alarm.name} at ${new Date().toLocaleString()}`);
-    
-    if (alarm.name === 'morningRestart') {
-        console.log('🌅 Morning restart alarm triggered!');
-        await handleMorningRestart();
-    } else if (alarm.name === 'periodicCheck') {
-        console.log('⏰ Periodic check alarm - checking for missed morning start...');
-        await checkForMissedMorningStart();
+    try {
+        if (alarm.name === 'morningRestart') {
+            console.log('🌅 Morning restart alarm triggered!');
+            await handleMorningRestart();
+        } else if (alarm.name === 'periodicCheck') {
+            console.log('⏰ Periodic check alarm - checking for missed morning start...');
+            await checkForMissedMorningStart();
+        } else if (alarm.name === 'regularWork') {
+            await scheduleNextWork(true);
+            await doBackgroundWork('scheduled');
+        } else if (alarm.name === 'scheduleTransition') {
+            await checkCurrentScheduleState();
+        } else if (alarm.name === 'midnightReset') {
+            if (backgroundWorkPromise) {
+                await searchQuest.forceStop('dayChange');
+                await backgroundWorkPromise;
+            }
+            await checkDayChange();
+            await setupMidnightReset();
+            await doBackgroundWork('nextDayRestart');
+        } else if (alarm.name === 'dailyTasks') {
+            const dailyState = await chrome.storage.local.get('dailyTasksManual');
+            await chrome.storage.local.set({dailyTasksManual: false});
+            if (manualStartActive || dailyState.dailyTasksManual || await isWithinSchedule()) {
+                const result = await dailyTasksQuest.doWork();
+                if (result?.success === false) {
+                    await chrome.alarms.create('dailyTasks', {delayInMinutes: 30});
+                }
+            } else {
+                await checkQuizAndDaily();
+            }
+        }
+    } catch (error) {
+        console.error(`Background alarm ${alarm.name} failed:`, error);
+        await chrome.storage.local.set({lastWorkError: error.message});
+        setBadge(new ErrorBadge());
     }
 });
 
@@ -46,22 +74,21 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 async function checkForMissedMorningStart() {
     try {
         const data = await chrome.storage.local.get(['lastRunDate', 'nextDayRestartTime', 'scheduleState']);
-        const today = new Date().toDateString();
-        const now = new Date();
+        const today = getLocalDateKey();
         
         console.log('Periodic check:', {
             lastRunDate: data.lastRunDate,
             today: today,
-            isNewDay: data.lastRunDate !== today,
+            isNewDay: !isSameLocalDay(data.lastRunDate),
             scheduleState: data.scheduleState
         });
         
         // If it's a new day and we haven't run today
-        if (data.lastRunDate !== today) {
+        if (!isSameLocalDay(data.lastRunDate)) {
             console.log('🌅 New day detected during periodic check!');
             
             // Check if searches are already running
-            if (searchQuest && searchQuest.jobStatus === STATUS_BUSY) {
+            if (backgroundWorkPromise || (searchQuest && searchQuest.jobStatus === STATUS_BUSY)) {
                 console.log('⚠️ Searches already running, skipping duplicate morning start');
                 return;
             }
@@ -77,6 +104,7 @@ async function checkForMissedMorningStart() {
             }
         } else {
             console.log('✓ Already ran today, no action needed');
+            await checkCurrentScheduleState();
         }
     } catch (error) {
         console.error('Error in periodic check:', error);
@@ -89,7 +117,7 @@ async function handleMorningRestart() {
         console.log('🌅 Executing morning restart...');
         
         // CRITICAL: Do not reset if searches are currently running
-        if (searchQuest && searchQuest.jobStatus === STATUS_BUSY) {
+        if (backgroundWorkPromise || (searchQuest && searchQuest.jobStatus === STATUS_BUSY)) {
             console.log('⚠️ Searches already running, skipping morning restart to avoid race condition');
             return;
         }
@@ -99,6 +127,7 @@ async function handleMorningRestart() {
         
         // Ensure components are initialized
         await checkAndFixCoreComponents();
+        await checkNewDay();
         
         // Reset all systems for new day
         if (searchQuest) {
@@ -115,7 +144,7 @@ async function handleMorningRestart() {
         if (googleTrend) {
             googleTrend.reset();
         }
-        if (dailyTasksQuest) {
+        if (dailyTasksQuest && dailyTasksQuest.jobStatus !== STATUS_BUSY) {
             dailyTasksQuest.reset();
         }
         
@@ -131,7 +160,7 @@ async function handleMorningRestart() {
         await chrome.storage.local.set({
             'scheduleState': 'active',
             'isSchedulePaused': false,
-            'lastRunDate': new Date().toDateString()
+            'lastRunDate': getLocalDateKey(),
         });
         
         // Check if we're within schedule
@@ -143,6 +172,7 @@ async function handleMorningRestart() {
             
             // Initialize schedule system
             await initializeScheduleSystem();
+            await checkQuizAndDaily();
             
             // Start searches after a brief delay
             setTimeout(async () => {
@@ -177,6 +207,8 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 });
 
 function onExtensionLoad() {
+    if (extensionLoadStarted) return;
+    extensionLoadStarted = true;
     console.log('Microsoft Rewards Bot: Extension starting...');
     try {
         setBadge(new GreyBadge());
@@ -201,9 +233,6 @@ function onExtensionLoad() {
                 setDelayedInitialisation(5000);
             }
         }, 1000);
-        
-        // Also set a delayed initialization as backup
-        setDelayedInitialisation(8000);
     } catch (error) {
         console.error('Error in onExtensionLoad:', error);
     }
@@ -211,7 +240,7 @@ function onExtensionLoad() {
 
 function loadSavedSettings() {
     console.log('Loading saved settings...');
-    chrome.storage.sync.get({
+    return chrome.storage.sync.get({
         compatibilityMode: false,
         pcUaOverrideEnable: false,
         mbUaOverrideEnable: false,
@@ -224,7 +253,7 @@ function loadSavedSettings() {
         searchVariation: 5,
         smartSwitching: true,    // Default to smart switching enabled
         interleaveSearches: false // Default to traditional sequential searches
-    }, function (options) {
+    }).then((options) => {
         _compatibilityMode = options.compatibilityMode;
         _pcUaOverrideEnable = options.pcUaOverrideEnable;
         _mbUaOverrideEnable = options.mbUaOverrideEnable;
@@ -273,6 +302,16 @@ const MAX_RECONNECTION_BACKOFF_MINUTES = 30; // Max backoff time in minutes
 const INITIAL_RECONNECTION_DELAY = 60000; // 1 minute initial retry delay
 
 async function initialize() {
+    if (!initializationPromise) {
+        initializationPromise = initializeCore().catch((error) => {
+            initializationPromise = null;
+            throw error;
+        });
+    }
+    return initializationPromise;
+}
+
+async function initializeCore() {
     console.log('Microsoft Rewards Bot: Initialization started');
     
     // Set log level to INFO by default
@@ -282,12 +321,11 @@ async function initialize() {
     await checkAndFixCoreComponents();
     
     // Check if it's a new day since last run
-    checkNewDay();
+    await checkDayChange();
+    await loadSavedSettings();
     
     // Reset DailyRewardStatus to ensure it's properly initialized
-    if (userDailyStatus) {
-        userDailyStatus.reset();
-    } else {
+    if (!userDailyStatus) {
         userDailyStatus = new DailyRewardStatus();
     }
     
@@ -307,7 +345,12 @@ async function initialize() {
 
     // Initial work attempt (only if within schedule)
     console.log('Starting initial background work...');
-    await doBackgroundWork('initialization');
+    const savedWork = await chrome.storage.local.get('nextRegularWorkTime');
+    if (!savedWork.nextRegularWorkTime || new Date(savedWork.nextRegularWorkTime).getTime() <= Date.now()) {
+        doBackgroundWork('initialization').catch((error) => {
+            console.error('Initial background work failed:', error);
+        });
+    }
     
     // Set proper initial badge based on current state (after work attempt)
     await setInitialBadgeState();
@@ -320,16 +363,16 @@ async function initialize() {
 
     // Instead of fixed interval, schedule based on settings
     console.log('Scheduling next work...');
-    scheduleNextWork();
+    await scheduleNextWork();
     
     // Setup midnight reset timer
-    setupMidnightReset();
+    await setupMidnightReset();
     
     console.log('Microsoft Rewards Bot: Initialization completed');
 }
 
 // Enhanced function to schedule next work with persistent scheduling
-async function scheduleNextWork() {
+async function scheduleNextWork(force = false) {
     console.log('scheduleNextWork() called');
     
     // Clear any existing scheduled work
@@ -343,8 +386,11 @@ async function scheduleNextWork() {
     const scheduleSettings = await chrome.storage.sync.get(['enableSchedule']);
     if (isSchedulePaused && scheduleSettings.enableSchedule) {
         console.log('Currently paused by schedule, not scheduling regular work');
+        await chrome.alarms.clear('regularWork');
         return;
     }
+    const existing = await chrome.alarms.get('regularWork');
+    if (!force && existing && existing.scheduledTime > Date.now()) return;
     
     // Get schedule settings
     const settings = await chrome.storage.sync.get({
@@ -362,7 +408,9 @@ async function scheduleNextWork() {
     const intervalMs = Math.max(60000, baseMs + variationMs); // Minimum 1 minute
     
     const now = new Date();
-    const nextWorkTime = new Date(now.getTime() + intervalMs);
+    const saved = await chrome.storage.local.get('nextRegularWorkTime');
+    const savedTime = saved.nextRegularWorkTime ? new Date(saved.nextRegularWorkTime).getTime() : 0;
+    const nextWorkTime = new Date(!force && savedTime > now.getTime() ? savedTime : now.getTime() + intervalMs);
     
     console.log(`Scheduling next regular work in ${Math.round(intervalMs/60000)} minutes (${nextWorkTime.toLocaleTimeString()})`);
     
@@ -378,25 +426,10 @@ async function scheduleNextWork() {
     }
     
     // Schedule the next work
-    scheduledWorkTimer = setTimeout(async () => {
-        console.log(`Executing scheduled regular work at ${new Date().toLocaleTimeString()}`);
-        
-        try {
-            await doBackgroundWork();
-        } catch (error) {
-            console.error('Error in scheduled background work:', error);
-        }
-        
-        // Schedule the next work after completion (if not paused)
-        if (!isSchedulePaused) {
-            scheduleNextWork();
-        }
-    }, intervalMs);
-    
-    console.log('scheduledWorkTimer set with ID:', scheduledWorkTimer);
+    await chrome.alarms.create('regularWork', {when: nextWorkTime.getTime()});
 }
 
-function setupMidnightReset() {
+async function setupMidnightReset() {
     // Calculate time until next midnight
     const now = new Date();
     const midnight = new Date();
@@ -406,47 +439,7 @@ function setupMidnightReset() {
     
     debugLog(`Scheduling midnight reset in ${Math.round(timeUntilMidnight/1000/60)} minutes`, LOG_LEVELS.INFO);
     
-    // Schedule the reset
-    setTimeout(() => {
-        debugLog('Executing midnight reset', LOG_LEVELS.INFO);
-        
-        // Reset all counters and status for the new day
-        checkNewDay();
-        resetDailyCounters();
-        
-        // Reset retry counters
-        reconnectionAttempts = 0;
-        lastConnectionFailTime = null;
-        
-        // Force searchQuest and userDailyStatus to reset and recalculate everything
-        if (searchQuest) searchQuest.reset();
-        if (exploreQuest) exploreQuest.reset();
-        if (userDailyStatus) userDailyStatus.reset();
-        if (googleTrend) googleTrend.reset();
-        if (dailyTasksQuest) dailyTasksQuest.reset();
-        
-        // If there are ongoing searches, forcibly pause them
-        if (searchQuest && searchQuest.jobStatus === STATUS_BUSY) {
-            debugLog('Forcibly pausing ongoing searches at midnight', LOG_LEVELS.INFO);
-            pauseActiveSearches();
-        }
-        
-        // Check if we're now within scheduled hours
-        isWithinSchedule().then(withinSchedule => {
-            if (withinSchedule) {
-                // Start work shortly after midnight if we're within schedule
-                setTimeout(() => {
-                    debugLog('Starting post-midnight background work', LOG_LEVELS.INFO);
-                    doBackgroundWork();
-                }, 60000); // Start work 1 minute after midnight
-            } else {
-                debugLog('Outside scheduled hours after midnight reset - waiting until scheduled start time', LOG_LEVELS.INFO);
-            }
-        });
-        
-        // Reschedule for next midnight
-        setupMidnightReset();
-    }, timeUntilMidnight);
+    await chrome.alarms.create('midnightReset', {when: midnight.getTime()});
 }
 
 // Schedule automatic restart for the next day when all searches are completed
@@ -486,7 +479,7 @@ async function scheduleNextDayRestart() {
         await chrome.storage.local.set({
             'nextDayRestartTime': nextRestartTime.toISOString(),
             'restartReason': 'morningAutoStart',
-            'lastScheduledDate': new Date().toDateString()
+            'lastScheduledDate': getLocalDateKey(),
         });
         
         // Clear any existing alarm
@@ -509,15 +502,6 @@ async function scheduleNextDayRestart() {
             console.log('✅ Periodic check alarm also created');
         }
         
-        // Also keep setTimeout as backup (will be lost on service worker restart)
-        if (scheduleWakeUpTimer) {
-            clearTimeout(scheduleWakeUpTimer);
-        }
-        scheduleWakeUpTimer = setTimeout(async () => {
-            console.log('⏰ Backup timer triggered for morning restart');
-            await handleMorningRestart();
-        }, timeUntilRestart);
-        
     } catch (error) {
         console.error('❌ Error scheduling next day restart:', error);
     }
@@ -530,7 +514,7 @@ async function checkAndRestoreNextDayTimer() {
         console.log('🔍 Checking for morning restart status...');
         
         const data = await chrome.storage.local.get(['nextDayRestartTime', 'restartReason', 'lastRunDate', 'lastScheduledDate']);
-        const today = new Date().toDateString();
+        const today = getLocalDateKey();
         const now = new Date();
         
         // Check if alarm exists
@@ -544,11 +528,11 @@ async function checkAndRestoreNextDayTimer() {
             lastRunDate: data.lastRunDate,
             lastScheduledDate: data.lastScheduledDate,
             today: today,
-            isNewDay: data.lastRunDate !== today
+            isNewDay: !isSameLocalDay(data.lastRunDate),
         });
         
         // If it's a new day and we haven't run today
-        if (data.lastRunDate !== today && data.nextDayRestartTime) {
+        if (!isSameLocalDay(data.lastRunDate) && data.nextDayRestartTime) {
             const restartTime = new Date(data.nextDayRestartTime);
             
             // If scheduled restart time has passed, we missed it!
@@ -587,41 +571,7 @@ async function checkAndRestoreNextDayTimer() {
                 const timeUntilRestart = restartTime - now;
                 console.log(`Restoring next day restart timer: ${Math.round(timeUntilRestart/1000/60/60)} hours remaining`);
                 
-                scheduleWakeUpTimer = setTimeout(async () => {
-                    console.log('Executing restored next day restart...');
-                    
-                    // Reset all systems for the new day
-                    if (searchQuest) searchQuest.reset();
-                    if (exploreQuest) exploreQuest.reset();
-                    if (userDailyStatus) userDailyStatus.reset();
-                    if (googleTrend) googleTrend.reset();
-                    
-                    // Clear pause state
-                    isSchedulePaused = false;
-                    await chrome.storage.local.set({
-                        'scheduleState': 'active',
-                        'isSchedulePaused': false
-                    });
-                    
-                    // Check if we're within schedule before starting
-                    const isWithin = await isWithinSchedule();
-                    if (isWithin) {
-                        console.log('Within schedule, starting searches for new day...');
-                        setBadge(new BusyBadge());
-                        setTimeout(() => {
-                            doBackgroundWork('nextDayRestart');
-                        }, 2000);
-                    } else {
-                        console.log('Outside schedule, setting gray badge and waiting for schedule');
-                        setBadge(new GreyBadge());
-                        // Let the schedule system handle when to start
-                    }
-                    
-                    // Clean up storage
-                    await chrome.storage.local.remove(['nextDayRestartTime', 'restartReason']);
-                    
-                }, timeUntilRestart);
-                
+                await chrome.alarms.create('morningRestart', {when: restartTime.getTime()});
             } else {
                 // Timer has passed, clean up and trigger restart immediately if appropriate
                 console.log('Restart time has passed, cleaning up and checking if restart is needed');
@@ -697,8 +647,13 @@ async function initializeScheduleSystem() {
         
         if (!settings.enableSchedule) {
             console.log('Scheduling disabled, clearing any existing timers');
-            clearAllScheduleTimers();
+            await clearAllScheduleTimers();
             isSchedulePaused = false; // Ensure we're not paused if scheduling is disabled
+            if (searchQuest._pausedBySchedule) searchQuest.resume();
+            await chrome.storage.local.set({
+                scheduleState: 'active',
+                isSchedulePaused: false,
+            });
             // Still return true to allow regular work scheduling
             return true;
         }
@@ -772,7 +727,7 @@ async function checkCurrentScheduleState() {
         // We're in schedule and were paused - resume
         console.log('📅 Within schedule but currently paused - resuming');
         await resumeFromSchedulePause();
-    } else if (!isWithinSchedule && !isSchedulePaused) {
+    } else if (!isWithinSchedule && !isSchedulePaused && !manualStartActive) {
         // We're outside schedule and not paused - pause
         console.log('📅 Outside schedule and not paused - pausing');
         await pauseForSchedule();
@@ -810,7 +765,7 @@ async function pauseForSchedule() {
         searchQuest._pausedBySchedule = true;
         
         if (typeof searchQuest.forceStop === 'function') {
-            await searchQuest.forceStop();
+            await searchQuest.forceStop('schedule');
         } else {
             searchQuest._jobStatus_ = STATUS_DONE;
         }
@@ -821,6 +776,8 @@ async function pauseForSchedule() {
         clearInterval(workIntervalId);
         workIntervalId = null;
     }
+    await chrome.alarms.clear('regularWork');
+    await chrome.storage.local.remove('nextRegularWorkTime');
     
     // Set appropriate badge (gray when outside schedule)
     console.log('🎨 Setting gray badge - outside schedule window');
@@ -858,7 +815,7 @@ async function resumeFromSchedulePause() {
     
     // Determine proper badge state before resuming
     try {
-        await checkDailyRewardStatus();
+        await userDailyStatus.update();
         const availablePoints = userDailyStatus?.summary?.availablePoints || 0;
         const areSearchesCompleted = 
             (userDailyStatus?.pcSearchStatus?.isCompleted || !userDailyStatus?.pcSearchStatus?.isValid) && 
@@ -1019,10 +976,7 @@ async function scheduleNextStateChange(settings) {
     }
     
     // Schedule the wake-up
-    scheduleWakeUpTimer = setTimeout(async () => {
-        console.log(`Executing scheduled ${nextAction} at ${new Date().toLocaleTimeString()}`);
-        await handleScheduledWakeUp(nextAction);
-    }, timeUntilChange);
+    await chrome.alarms.create('scheduleTransition', {when: nextChangeTime.getTime()});
 }
 
 async function handleScheduledWakeUp(action) {
@@ -1053,7 +1007,7 @@ async function handleScheduledWakeUp(action) {
     }
 }
 
-function clearAllScheduleTimers() {
+async function clearAllScheduleTimers() {
     console.log('Clearing all schedule timers');
     
     if (scheduleWakeUpTimer) {
@@ -1065,6 +1019,8 @@ function clearAllScheduleTimers() {
         clearTimeout(scheduledWorkTimer);
         scheduledWorkTimer = null;
     }
+    await chrome.alarms.clear('scheduleTransition');
+    await chrome.storage.local.remove(['nextWakeUpTime', 'nextScheduleAction']);
 }
 
 async function waitTillOnline() {
@@ -1129,7 +1085,24 @@ async function waitTillOnline() {
     }, waitTime);
 }
 
-async function doBackgroundWork() {
+function doBackgroundWork(reason = 'scheduled') {
+    if (backgroundWorkPromise) return backgroundWorkPromise;
+    manualStartActive = reason === 'manualStart';
+    backgroundWorkPromise = Promise.resolve().then(() => runBackgroundWork(reason)).catch(async (error) => {
+        console.error('Background work failed:', error);
+        await chrome.storage.local.set({lastWorkError: error.message, workState: 'error'});
+        setBadge(new ErrorBadge());
+        throw error;
+    }).finally(async () => {
+        manualStartActive = false;
+        backgroundWorkPromise = null;
+        await scheduleNextWork();
+    });
+    return backgroundWorkPromise;
+}
+
+async function runBackgroundWork(reason) {
+    const isManualStart = reason === 'manualStart';
     console.log('=== BACKGROUND WORK DEBUG START ===');
     console.log('Background work starting...');
     
@@ -1143,7 +1116,7 @@ async function doBackgroundWork() {
     });
     
     // Check if we're paused by schedule
-    if (isSchedulePaused) {
+    if (isSchedulePaused && !isManualStart) {
         console.log('❌ BLOCKED: Currently paused by schedule, skipping background work');
         return;
     }
@@ -1153,12 +1126,11 @@ async function doBackgroundWork() {
     const lastWorkTime = await chrome.storage.local.get('lastWorkAttempt');
     const now = Date.now();
     
-    // Check if this is a manual start or initialization by looking at the call stack or a flag
-    const isManualStart = arguments.length > 0 && arguments[0] === 'manualStart';
-    const isInitialization = arguments.length > 0 && arguments[0] === 'initialization';
-    const isScheduleResume = arguments.length > 0 && arguments[0] === 'scheduleResume';
-    const isNextDayRestart = arguments.length > 0 && arguments[0] === 'nextDayRestart';
-    const isPointsBasedRestart = arguments.length > 0 && arguments[0] === 'pointsBasedRestart';
+    // Explicit start reasons bypass the automatic retry throttle.
+    const isInitialization = reason === 'initialization';
+    const isScheduleResume = reason === 'scheduleResume';
+    const isNextDayRestart = reason === 'nextDayRestart' || reason === 'morningRestart';
+    const isPointsBasedRestart = reason === 'pointsBasedRestart';
     const shouldBypassRapidRetry = isManualStart || isInitialization || isScheduleResume || isNextDayRestart || isPointsBasedRestart;
     
     if (lastWorkTime.lastWorkAttempt && !shouldBypassRapidRetry) {
@@ -1191,12 +1163,9 @@ async function doBackgroundWork() {
     // Check day change first
     await checkDayChange();
     
-    // Update daily reset 
-    checkNewDay();
-    
     // Check schedule using the new system (this handles pausing/resuming automatically)
     console.log('About to call checkCurrentScheduleState()...');
-    const withinSchedule = await checkCurrentScheduleState();
+    const withinSchedule = isManualStart || await checkCurrentScheduleState();
     console.log('Schedule check result:', { withinSchedule });
     
     if (!withinSchedule) {
@@ -1204,14 +1173,25 @@ async function doBackgroundWork() {
         return;
     }
     console.log('✅ PASSED: Schedule check');
+    const manualPause = await chrome.storage.local.get(['searchPausedAt', 'searchPausedReason']);
+    if (!isManualStart && manualPause.searchPausedReason === 'manualStop' &&
+        manualPause.searchPausedAt && isSameLocalDay(getLocalDateKey(new Date(manualPause.searchPausedAt)))) {
+        console.log('Searches were manually stopped today; waiting for a manual restart.');
+        return;
+    }
+    await chrome.storage.local.set({workState: 'starting', lastWorkError: null});
+    await scheduleNextWork();
     
     // Check for connectivity before proceeding
     console.log('Checking connectivity...');
     await waitTillOnline();
     console.log('✅ PASSED: Connectivity check');
     
+    if (userDailyStatus.jobStatus === STATUS_BUSY) {
+        await userDailyStatus.update();
+    }
     // Add guard against parallel execution
-    if (searchQuest.jobStatus === STATUS_BUSY || userDailyStatus.jobStatus === STATUS_BUSY) {
+    if (searchQuest.jobStatus === STATUS_BUSY) {
         console.log('❌ BLOCKED: Work already in progress, skipping...', {
             searchQuestBusy: searchQuest.jobStatus === STATUS_BUSY,
             userDailyStatusBusy: userDailyStatus.jobStatus === STATUS_BUSY
@@ -1223,9 +1203,9 @@ async function doBackgroundWork() {
     // Special handling for wake-up scenarios - if searches were paused and we're now in a DONE state,
     // but it's been a while since last work, consider restarting
     const pauseData = await chrome.storage.local.get(['searchPausedAt', 'lastWorkAttempt']);
-    const isScheduleResumeCheck = arguments.length > 0 && arguments[0] === 'scheduleResume';
-    const isNextDayRestartCheck = arguments.length > 0 && arguments[0] === 'nextDayRestart';
-    const isPointsBasedRestartCheck = arguments.length > 0 && arguments[0] === 'pointsBasedRestart';
+    const isScheduleResumeCheck = isScheduleResume;
+    const isNextDayRestartCheck = isNextDayRestart;
+    const isPointsBasedRestartCheck = isPointsBasedRestart;
     
     if (pauseData.searchPausedAt && searchQuest.jobStatus === STATUS_DONE) {
         const pausedAt = new Date(pauseData.searchPausedAt);
@@ -1256,6 +1236,7 @@ async function doBackgroundWork() {
 
     // Set badge to busy while we work
     setBadge(new BusyBadge());
+    const searchSettings = await chrome.storage.sync.get({disableMobile: false});
     
     try {
         // Store the search status before we check
@@ -1268,7 +1249,7 @@ async function doBackgroundWork() {
         });
         
         // Run the reward status check
-        await checkDailyRewardStatus();
+        await checkDailyRewardStatus(isManualStart);
         
         // Log the current search quest job status
         console.log('Search quest job status after reward check:', {
@@ -1280,31 +1261,20 @@ async function doBackgroundWork() {
             mbCompleted: userDailyStatus?.mbSearchStatus?.isCompleted || false
         });
         
-        // Check how long the extension has been running
-        const runtimeMs = Date.now() - extensionStartTime;
-        console.log(`Extension runtime: ${Math.round(runtimeMs/1000)} seconds`);
-        
-        // Only set the badge to done if:
-        // 1. We were in busy state
-        // 2. Searches were really completed (either already completed or completed in this run)
-        // 3. Extension has been running for at least MIN_RUNTIME_BEFORE_DONE
         if (isCurrentBadge('busy')) {
             // Check if searches are completed based on boolean flags
             const areSearchesCompleted = 
                 (userDailyStatus?.pcSearchStatus?.isCompleted || !userDailyStatus?.pcSearchStatus?.isValid) && 
-                (userDailyStatus?.mbSearchStatus?.isCompleted || !userDailyStatus?.mbSearchStatus?.isValid);
+                (searchSettings.disableMobile || userDailyStatus?.mbSearchStatus?.isCompleted || !userDailyStatus?.mbSearchStatus?.isValid);
             
-            // Check if we actually have 0 points remaining (true completion)
+            // Other activities do not block completion of enabled search counters.
             const availablePoints = userDailyStatus?.summary?.availablePoints || 0;
-            const areTrulyCompleted = areSearchesCompleted && availablePoints === 0;
+            const areTrulyCompleted = areSearchesCompleted;
             
             // Check if we performed any searches in this run
             const didSearchesThisRun = 
                 (!initialPcCompleted && userDailyStatus?.pcSearchStatus?.isCompleted) ||
                 (!initialMbCompleted && userDailyStatus?.mbSearchStatus?.isCompleted);
-                
-            // Only allow the badge to turn green if the extension has been running for a minimum time
-            const canShowDone = runtimeMs >= MIN_RUNTIME_BEFORE_DONE;
                 
             console.log('Search completion status for badge decision:', {
                 areSearchesCompleted: areSearchesCompleted,
@@ -1312,52 +1282,10 @@ async function doBackgroundWork() {
                 areTrulyCompleted: areTrulyCompleted,
                 didSearchesThisRun: didSearchesThisRun,
                 searchQuestStatus: searchQuest.jobStatus,
-                runtimeMs: runtimeMs,
-                canShowDone: canShowDone
             });
             
-            // If searches show complete but we still have points, restart a cycle
-            if (areSearchesCompleted && availablePoints > 0 && canShowDone) {
-                console.log(`Searches marked complete but ${availablePoints} points remaining - starting another cycle`);
-                
-                // Send notification about additional cycle
-                try {
-                    await chrome.notifications.create('additional-cycle', {
-                        type: 'basic',
-                        iconUrl: 'img/bingRwLogo@8x.png',
-                        title: 'Additional Search Cycle',
-                        message: `${availablePoints} points remaining. Running additional searches.`,
-                        priority: 1
-                    });
-                } catch (error) {
-                    console.log('Notification failed (may be disabled):', error.message);
-                }
-                
-                // Reset search completion flags to allow another cycle
-                if (userDailyStatus?.pcSearchStatus) {
-                    userDailyStatus.pcSearchStatus.isCompleted = false;
-                }
-                if (userDailyStatus?.mbSearchStatus) {
-                    userDailyStatus.mbSearchStatus.isCompleted = false;
-                }
-                
-                // Reset search quest to allow fresh work
-                if (searchQuest) {
-                    searchQuest.resume();
-                    console.log('Search quest reset for additional cycle');
-                }
-                
-                // Continue with busy badge and restart searches
-                setTimeout(() => {
-                    console.log('Starting additional search cycle to earn remaining points');
-                    doBackgroundWork('pointsBasedRestart');
-                }, 5000); // 5 second delay
-                
-                return; // Exit early to avoid setting done badge
-            }
-            
-            if (areTrulyCompleted && canShowDone) {
-                console.log('All searches are truly completed (0 points remaining) and minimum runtime reached, setting badge to done');
+            if (areTrulyCompleted) {
+                console.log('Rewards confirms all enabled search counters are complete');
                 setBadge(new DoneBadge());
                 
                 // Send completion notification with actual daily max reached
@@ -1369,7 +1297,7 @@ async function doBackgroundWork() {
                         type: 'basic',
                         iconUrl: 'img/bingRwLogo@8x.png',
                         title: 'Daily Searches Complete! 🎉',
-                        message: `Reached maximum ${maxDailyPoints} search points for the day! (${totalPoints}/${maxDailyPoints})`,
+                        message: `All enabled search counters are complete. Rewards reports ${totalPoints}/${maxDailyPoints} search points.`,
                         priority: 2
                     });
                 } catch (error) {
@@ -1378,24 +1306,6 @@ async function doBackgroundWork() {
                 
                 // Schedule automatic restart for next day
                 await scheduleNextDayRestart();
-            } else if (areTrulyCompleted && !canShowDone) {
-                console.log('Searches truly completed but not showing done badge yet (runtime < minimum)');
-                // Schedule a timeout to set the done badge after minimum runtime
-                const remainingTime = MIN_RUNTIME_BEFORE_DONE - runtimeMs;
-                console.log(`Will set done badge after ${Math.round(remainingTime/1000)} more seconds`);
-                
-                // Keep busy badge for now
-                setTimeout(async () => {
-                    // Double check that conditions are still true
-                    const currentAvailablePoints = userDailyStatus?.summary?.availablePoints || 0;
-                    if (areTrulyCompleted && currentAvailablePoints === 0 && !searchQuest.jobStatus === STATUS_BUSY) {
-                        console.log('Setting delayed done badge after minimum runtime');
-                        setBadge(new DoneBadge());
-                        
-                        // Schedule automatic restart for next day
-                        await scheduleNextDayRestart();
-                    }
-                }, remainingTime);
             } else if (didSearchesThisRun) {
                 console.log('Searches performed in this run but more needed, keeping busy badge');
                 // Keep busy badge to indicate work in progress
@@ -1408,59 +1318,27 @@ async function doBackgroundWork() {
         console.error('Error in daily reward status check:', error);
         // Don't immediately retry on error
         setBadge(new ErrorBadge());
-        return;
+        throw error;
     }
+    await chrome.storage.local.set({workState: 'idle'});
     
     // After work completion, schedule the next run with proper timing
-    scheduleNextWork();
+    await scheduleNextWork();
 }
 
 // Add a new function to explicitly check for day changes
 async function checkDayChange() {
-    try {
-        const data = await chrome.storage.local.get({
-            lastRunDate: '',
-            lastSearchTime: null
-        });
-        
-        const today = new Date().toLocaleDateString();
-        const lastRunDate = data.lastRunDate;
-        
-        // If we have a last search time, check if it's from a previous day
-        if (data.lastSearchTime) {
-            const lastSearchDate = new Date(data.lastSearchTime).toLocaleDateString();
-            
-            if (lastSearchDate !== today) {
-                debugLog(`Day change detected: Last search: ${lastSearchDate}, Today: ${today}`, LOG_LEVELS.INFO);
-                
-                // Reset counters for the new day
-                resetDailyCounters();
-                
-                // Reset objects
-                googleTrend.reset();
-                searchQuest.reset();
-                if (exploreQuest) exploreQuest.reset();
-                userDailyStatus.reset();
-                
-                // Clear old schedule and force new one for today
-                console.log('Clearing old schedule data due to day change...');
-                await chrome.storage.local.remove(['nextRegularWorkTime', 'lastWorkAttempt']);
-                
-                // Force a new schedule
-                console.log('Scheduling new work for today...');
-                scheduleNextWork();
-                
-                // Update last run date
-                chrome.storage.local.set({lastRunDate: today});
-            }
-        }
-        
-        // Always ensure lastRunDate is set
-        if (lastRunDate !== today) {
-            chrome.storage.local.set({lastRunDate: today});
-        }
-    } catch (error) {
-        console.error('Error checking day change:', error);
+    const changed = await checkNewDay();
+    if (changed && searchQuest.jobStatus !== STATUS_BUSY) {
+        googleTrend.reset();
+        searchQuest.reset();
+        exploreQuest.reset();
+        userDailyStatus.reset();
+        if (dailyTasksQuest.jobStatus !== STATUS_BUSY) dailyTasksQuest.reset();
+        await chrome.alarms.clear('regularWork');
+        await chrome.storage.local.remove('nextRegularWorkTime');
+        reconnectionAttempts = 0;
+        lastConnectionFailTime = null;
     }
 }
 
@@ -1468,7 +1346,7 @@ async function setTimeoutAsync(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function checkDailyRewardStatus() {
+async function checkDailyRewardStatus(force = false) {
     console.log('Checking daily reward status...');
     
     // Add status check cooldown
@@ -1476,11 +1354,12 @@ async function checkDailyRewardStatus() {
     const now = Date.now();
     const STATUS_CHECK_COOLDOWN = 10000; // 10 seconds between status checks
     
-    if (lastStatusCheck.lastStatusCheck) {
+    let useCachedStatus = false;
+    if (!force && lastStatusCheck.lastStatusCheck && userDailyStatus.summary.isValid) {
         const timeSinceLastCheck = now - lastStatusCheck.lastStatusCheck;
         if (timeSinceLastCheck < STATUS_CHECK_COOLDOWN) {
             console.log(`Status check too frequent (${Math.round(timeSinceLastCheck/1000)}s < ${STATUS_CHECK_COOLDOWN/1000}s), skipping...`);
-            return;
+            useCachedStatus = true;
         }
     }
     
@@ -1496,7 +1375,7 @@ async function checkDailyRewardStatus() {
     console.log('Updating user daily status...');
     
     try {
-        const result = await userDailyStatus.update();
+        const result = useCachedStatus || await userDailyStatus.update();
         console.log('Status update complete, result:', result);
         
         if (!result || !userDailyStatus.summary || !userDailyStatus.summary.isValid) {
@@ -1504,7 +1383,7 @@ async function checkDailyRewardStatus() {
         }
         
         await doExploreTasks();
-        await checkQuizAndDaily();
+        await checkQuizAndDaily(force);
         await doSearchQuests();
         
     } catch (error) {
@@ -1513,7 +1392,7 @@ async function checkDailyRewardStatus() {
     }
 }
 
-async function checkQuizAndDaily() {
+async function checkQuizAndDaily(manual = false) {
     console.log('Checking quiz and daily activities...');
 
     try {
@@ -1527,18 +1406,22 @@ async function checkQuizAndDaily() {
             return;
         }
 
-        // Schedule with variable offset (0-10 min jitter) so tasks don't always
-        // fire at the exact same moment relative to searches.
-        const jitterMs = Math.random() * 10 * 60 * 1000;
+        const settings = await chrome.storage.sync.get({enableDailyTasks: false, dailyTaskDelay: 0});
+        if (!settings.enableDailyTasks) {
+            await chrome.alarms.clear('dailyTasks');
+            return;
+        }
+        const existing = await chrome.alarms.get('dailyTasks');
+        if (existing && existing.scheduledTime > Date.now()) return;
+        const jitterMs = (Math.random() * 10 + Number(settings.dailyTaskDelay)) * 60 * 1000;
         console.log(`[DailyTasks] Scheduled to start in ${Math.round(jitterMs / 1000)}s`);
-
-        setTimeout(async () => {
-            try {
-                await dailyTasksQuest.doWork();
-            } catch (err) {
-                console.error('[DailyTasks] Error in doWork:', err);
-            }
-        }, jitterMs);
+        let when = Date.now() + Math.max(1000, jitterMs);
+        if (!manual && !await isWithinSchedule()) {
+            const state = await chrome.storage.local.get('nextWakeUpTime');
+            if (state.nextWakeUpTime) when = Math.max(when, new Date(state.nextWakeUpTime).getTime());
+        }
+        await chrome.storage.local.set({dailyTasksManual: manual});
+        await chrome.alarms.create('dailyTasks', {when});
 
         debugLog('Daily tasks quest scheduled.', LOG_LEVELS.INFO);
     } catch (error) {
@@ -1615,31 +1498,18 @@ async function doSearchQuests() {
             }
         });
         
-        // IMPORTANT FIX: Force search flag to true - this overrides the auto-detection
-        // which is incorrectly determining searches are completed
-        const forceSearches = true;
-        
-        // Fix the logic to determine if searches are needed
-        // 1. If PC searches are not completed and valid, we need searches
-        // 2. If mobile searches are not completed and valid, we need searches 
-        // 3. If forceSearches is true, we always do searches
-        const areSearchesNeeded = forceSearches || 
+        const settings = await chrome.storage.sync.get({disableMobile: false});
+        if (searchQuest._manuallyPaused) return;
+        const areSearchesNeeded =
             (!userDailyStatus.pcSearchStatus.isCompleted && userDailyStatus.pcSearchStatus.isValid) || 
-            (!userDailyStatus.mbSearchStatus.isCompleted && userDailyStatus.mbSearchStatus.isValid);
+            (!settings.disableMobile && !userDailyStatus.mbSearchStatus.isCompleted && userDailyStatus.mbSearchStatus.isValid);
         
-        console.log('Are searches needed:', areSearchesNeeded, '(forced:', forceSearches, ')');
+        console.log('Are searches needed:', areSearchesNeeded);
         
         if (!areSearchesNeeded) {
             console.log('No searches needed based on detailed status check.');
             return;
         }
-        
-        // Reset stored search counts to ensure we start fresh
-        await chrome.storage.local.set({
-            pcSearchCount: 0,
-            mbSearchCount: 0,
-        });
-        console.log('Reset search counts to ensure searches will run');
         
         // Always verify user agents before starting searches
         if (!userAgents || !userAgents.pc || !userAgents.mb) {
@@ -1663,15 +1533,6 @@ async function doSearchQuests() {
         });
         
         try {
-            // Reset the search quest to ensure fresh state
-            searchQuest.reset();
-            
-            // Force progress tracking properties to reset
-            userDailyStatus.pcSearchStatus.progress = 0;
-            userDailyStatus.pcSearchStatus.isCompleted = false;
-            userDailyStatus.mbSearchStatus.progress = 0;
-            userDailyStatus.mbSearchStatus.isCompleted = false;
-            
             // Start the search work
             await searchQuest.doWork(userDailyStatus);
         } catch (searchEx) {
@@ -1769,10 +1630,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 // Add direct initialization for service workers
-if ('serviceWorker' in navigator) {
-    console.log('Service worker detected - initializing directly');
-    onExtensionLoad();
-}
+onExtensionLoad();
 
 // Add manual trigger for background work
 chrome.runtime.onStartup.addListener(async () => {
@@ -1822,56 +1680,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     
                     return true; // Keep message channel open for async response
                     
-                case 'startSearches':
-                    console.log('=== MANUAL START SEARCHES DEBUG ===');
-                    console.log('Manually starting searches - initial state:', {
-                        isSchedulePaused,
-                        searchQuestStatus: searchQuest?.jobStatus,
-                        userDailyStatusBusy: userDailyStatus?.jobStatus,
-                        timestamp: new Date().toLocaleTimeString()
-                    });
-                    
-                    // Clear any next-day restart timer since user is manually starting
-                    if (scheduleWakeUpTimer) {
-                        clearTimeout(scheduleWakeUpTimer);
-                        scheduleWakeUpTimer = null;
-                        console.log('Cleared next-day restart timer due to manual start');
-                    }
-                    await chrome.storage.local.remove(['nextDayRestartTime', 'restartReason']);
-                    
-                    // For manual starts, temporarily bypass schedule pause
-                    const wasSchedulePaused = isSchedulePaused;
-                    if (isSchedulePaused) {
-                        console.log('Temporarily bypassing schedule pause for manual start');
-                        isSchedulePaused = false;
-                    }
-                
-                // Also ensure search quest is not stuck in DONE state
-                if (searchQuest && searchQuest.jobStatus === STATUS_DONE) {
-                    console.log('Resetting search quest from DONE to NONE for manual start');
-                    searchQuest.jobStatus = STATUS_NONE;
-                }
-                
-                console.log('About to call doBackgroundWork() with state:', {
+            case 'startSearches':
+                console.log('=== MANUAL START SEARCHES DEBUG ===');
+                console.log('Manually starting searches - initial state:', {
                     isSchedulePaused,
                     searchQuestStatus: searchQuest?.jobStatus,
-                    userDailyStatusBusy: userDailyStatus?.jobStatus
+                    userDailyStatusBusy: userDailyStatus?.jobStatus,
+                    timestamp: new Date().toLocaleTimeString(),
                 });
-                
-                doBackgroundWork('manualStart').then((result) => {
-                    console.log('Manual doBackgroundWork completed, result:', result);
-                    sendResponse({success: true, message: 'Search work started'});
-                }).catch(error => {
+
+                if (backgroundWorkPromise || searchQuest.jobStatus === STATUS_BUSY) {
+                    sendResponse({success: true, message: 'Search work is already running'});
+                    return;
+                }
+                await chrome.alarms.clear('morningRestart');
+                await chrome.storage.local.remove(['nextDayRestartTime', 'restartReason']);
+                searchQuest.resume(true);
+                await chrome.storage.local.remove(['searchPausedAt', 'searchPausedReason', 'lastWorkError']);
+                doBackgroundWork('manualStart').catch((error) => {
                     console.error('Manual doBackgroundWork failed:', error);
-                    sendResponse({success: false, error: error.message});
-                }).finally(() => {
-                    // Restore original pause state after attempt
-                    isSchedulePaused = wasSchedulePaused;
-                    console.log('Restored original schedule pause state:', isSchedulePaused);
                 });
+                sendResponse({success: true, message: 'Search start requested'});
                 return true; // Keep message channel open for async response
-                
+
+            case 'checkStatus':
+                if (backgroundWorkPromise) {
+                    sendResponse({success: true});
+                } else {
+                    try {
+                        await userDailyStatus.update();
+                        sendResponse({success: true});
+                    } catch (error) {
+                        sendResponse({success: false, error: error.message});
+                    }
+                }
+                break;
+
             case 'getSearchProgress':
+                if (backgroundWorkPromise && searchQuest.jobStatus !== STATUS_BUSY) {
+                    sendResponse({success: true, inProgress: false, starting: true});
+                    break;
+                }
+                const workState = await chrome.storage.local.get('lastWorkError');
+                if (workState.lastWorkError) {
+                    sendResponse({success: true, inProgress: false, error: workState.lastWorkError});
+                    break;
+                }
                 if (searchQuest && searchQuest.jobStatus === STATUS_BUSY) {
                     const searchInfo = searchQuest.getSearchProgress();
                     console.debug('Returning search progress to UI:', searchInfo);
@@ -1957,24 +1811,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         // Check if the scheduled time is in the past
                         if (scheduledTime < now) {
                             console.log('Scheduled time is in the past, forcing schedule refresh...');
-                            // Force a new schedule to be created
-                            scheduleNextWork().then(() => {
-                                // Get the updated time
-                                chrome.storage.local.get(['nextRegularWorkTime']).then(updatedData => {
-                                    console.log('Updated next work time:', updatedData.nextRegularWorkTime);
-                                    sendResponse({
-                                        success: true,
-                                        nextScheduledTime: updatedData.nextRegularWorkTime,
-                                        isSchedulePaused: isSchedulePaused
-                                    });
-                                });
-                            }).catch(error => {
-                                console.error('Error refreshing schedule:', error);
-                                sendResponse({
-                                    success: false,
-                                    error: error.message
-                                });
+                            doBackgroundWork('scheduled').catch((error) => {
+                                console.error('Missed scheduled work failed:', error);
                             });
+                            sendResponse({success: true, nextScheduledTime: null, isSchedulePaused});
                             return; // Exit early, response will be sent above
                         }
                         
@@ -2003,29 +1843,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 return true; // Keep message channel open for async response
                 
             case 'getRewardsData':
-                // Try to get rewards data from the status object
                 try {
-                    if (userDailyStatus && userDailyStatus.summary) {
-                        const data = {
-                            success: true,
-                            data: {
-                                earnedToday: userDailyStatus.summary.earnedToday || 0,
-                                remainingPoints: userDailyStatus.summary.availablePoints || 0,
-                                pcSearchProgress: userDailyStatus.pcSearchStatus.progress || 0,
-                                pcSearchTotal: userDailyStatus.pcSearchStatus.progressMax || 0,
-                                mbSearchProgress: userDailyStatus.mbSearchStatus.progress || 0,
-                                mbSearchTotal: userDailyStatus.mbSearchStatus.progressMax || 0
-                            },
-                            timestamp: new Date().toISOString()
-                        };
-                        sendResponse(data);
-                    } else {
-                        // Status not initialized yet
-                        sendResponse({
-                            success: false,
-                            error: 'Status not initialized'
-                        });
-                    }
+                    sendResponse({
+                        success: true,
+                        data: await getRewardsDataForPopup(),
+                        timestamp: new Date().toISOString(),
+                    });
                 } catch (error) {
                     console.error('Error getting rewards data:', error);
                     sendResponse({
@@ -2091,21 +1914,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 console.log('Search settings updated:', message.content);
                 try {
                     // Reload settings if they've changed
-                    loadSavedSettings();
+                    await loadSavedSettings();
                     
                     // Reset any cached search settings for the new day
-                    if (searchQuest) {
+                    if (searchQuest && searchQuest.jobStatus !== STATUS_BUSY) {
                         searchQuest._targetSearchCount = null; // Force recalculation
+                        await searchQuest._loadSearchSettings();
                     }
                     
                     // If schedule settings changed, reinitialize the scheduling system
                     if (message.content && message.content.scheduleChanged) {
                         console.log('Schedule settings changed, reinitializing schedule system');
-                        initializeScheduleSystem().then(() => {
-                            console.log('Schedule system reinitialized');
-                        }).catch(error => {
-                            console.error('Error reinitializing schedule system:', error);
-                        });
+                        await initializeScheduleSystem();
+                        await scheduleNextWork(true);
+                        await checkQuizAndDaily();
                     }
                     
                     sendResponse({
@@ -2243,7 +2065,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({
             success: false,
             error: error.message || 'Unknown error'
-        });
+            });
     }
 };
 
@@ -2331,7 +2153,7 @@ async function getRewardsDataForPopup() {
         }
         
         // Check if we have valid data after update
-        if (!userDailyStatus || !userDailyStatus.summary) {
+        if (!userDailyStatus?.summary?.isValid) {
             throw new Error('Failed to load rewards data - user status not valid');
         }
         
@@ -2339,8 +2161,10 @@ async function getRewardsDataForPopup() {
         const summary = userDailyStatus.getStatusSummary();
         
         return {
-            earnedToday: summary.earnedToday || 0,
-            remainingPoints: summary.availablePoints || 0,
+            earnedToday: summary.earnedToday,
+            remainingPoints: summary.availablePoints,
+            warning: summary.activityTotalsError ?
+                'Some activity totals are unavailable; search counters are still valid.' : null,
             pcSearchProgress: summary.pcSearchStatus.progress || 0,
             pcSearchTotal: summary.pcSearchStatus.progressMax || 0,
             mbSearchProgress: summary.mbSearchStatus.progress || 0,
@@ -2434,7 +2258,6 @@ async function recoverFromServiceWorkerRestart() {
                 }
             }
         }
-        
     } catch (error) {
         console.error('Error during service worker recovery:', error);
     }

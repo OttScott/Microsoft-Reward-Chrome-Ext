@@ -52,7 +52,8 @@ function saveOptions() {
                 baseSearchCount: options.baseSearchCount,
                 searchVariation: options.searchVariation,
                 smartSwitching: options.smartSwitching,
-                interleaveSearches: options.interleaveSearches
+                interleaveSearches: options.interleaveSearches,
+                scheduleChanged: true,
             }
         }, () => {
             const status = document.getElementById('status');

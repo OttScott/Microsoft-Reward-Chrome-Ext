@@ -29,36 +29,31 @@ function debugLog(message, level = LOG_LEVELS.INFO, ...args) {
 
 let _prevWeekDay = -1;
 
-function checkNewDay() {
-    const currentDate = new Date().toLocaleDateString();
-    
-    chrome.storage.local.get({lastRunDate: ''}, function(data) {
-        // Check if it's a new day or if lastRunDate is not set
-        if (data.lastRunDate !== currentDate) {
-            debugLog(`New day detected! Previous: ${data.lastRunDate}, Current: ${currentDate}`, LOG_LEVELS.INFO);
-            
-            // Update the last run date
-            chrome.storage.local.set({lastRunDate: currentDate});
-            
-            // Reset search state and counters
-            resetDailyCounters();
-            
-            // Force a full status refresh on new day
-            chrome.runtime.sendMessage({
-                action: 'newDay'
-            }).catch(err => {
-                // Ignore error if no listeners
-                debugLog('No listeners for newDay event', LOG_LEVELS.DEBUG);
-            });
-        }
-    });
+function getLocalDateKey(date = new Date()) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function resetDailyCounters() {
+function isSameLocalDay(value, date = new Date()) {
+    return value === getLocalDateKey(date) ||
+        value === date.toLocaleDateString() || value === date.toDateString();
+}
+
+async function checkNewDay() {
+    const data = await chrome.storage.local.get({lastRunDate: ''});
+    const changed = !isSameLocalDay(data.lastRunDate);
+    if (changed) {
+        debugLog(`New day detected! Previous: ${data.lastRunDate}`, LOG_LEVELS.INFO);
+        await resetDailyCounters();
+    }
+    await chrome.storage.local.set({lastRunDate: getLocalDateKey()});
+    return changed;
+}
+
+async function resetDailyCounters() {
     debugLog('Resetting daily counters and search state', LOG_LEVELS.INFO);
     
     // Reset local storage values related to daily state
-    chrome.storage.local.set({
+    await chrome.storage.local.set({
         'dailySearchComplete': false,
         'pcSearchCount': 0,
         'mbSearchCount': 0,
@@ -70,9 +65,10 @@ function resetDailyCounters() {
         'searchPausedAt': null,   // Clear any paused state
         'pausedSearchCount': 0,
         'pausedSearchType': null,
-        'searchPausedReason': null
-    }, () => {
-        debugLog('Local storage counters reset', LOG_LEVELS.INFO);
+        'searchPausedReason': null,
+        'lastStatusCheck': null,
+        'lastWorkError': null,
+        'dailyTasksDone': false,
     });
     
     // Reset the UI if the popup is open
@@ -187,7 +183,13 @@ function getTodayDate() {
     if (mm < 10) {
         mm = '0' + mm;
     }
-    return `${mm}/${today.getFullYear()}`;
+    return `${mm}/${dd}/${today.getFullYear()}`;
+}
+
+function getDailySetPromotions(flyout) {
+    const sets = flyout.DailySetPromotions || {};
+    if (Array.isArray(sets)) return sets;
+    return sets[getTodayDate()] || sets[new Date().toLocaleDateString('en-US')] || [];
 }
 
 function resetDayBoundParams() {

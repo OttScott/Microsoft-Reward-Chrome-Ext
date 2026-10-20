@@ -7,9 +7,12 @@ Implemented a robust, persistent scheduling and wake-up system for the Microsoft
 
 ### 1. **Enhanced Timer Management**
 - **Before**: Single `scheduledWorkTimer` with basic timeout functionality
-- **After**: Multiple specialized timers with clear purposes:
-  - `scheduledWorkTimer`: For regular work intervals
-  - `scheduleWakeUpTimer`: For scheduled start time wake-ups  
+- **After (2.28.1.0)**: Durable Chrome alarms with clear purposes:
+  - `regularWork`: Regular work intervals, rearmed before long-running work
+  - `scheduleTransition`: Scheduled start/end transitions
+  - `morningRestart` and `periodicCheck`: Next-day work and missed-start recovery
+  - `midnightReset`: Local-day counter reset
+  - `dailyTasks`: Delayed Daily Tasks and failed-task retries
   - `isSchedulePaused`: Global state tracking
 
 ### 2. **Persistent State Management**
@@ -50,10 +53,10 @@ Implemented a robust, persistent scheduling and wake-up system for the Microsoft
 - **Overnight Support**: Handles schedules that cross midnight
 - **Persistent Timers**: Saves timer info to storage for recovery
 
-#### `handleScheduledWakeUp()`
-- **Automated State Changes**: Executes scheduled pause/resume actions
-- **Self-Scheduling**: Automatically schedules the next state change
-- **Error Recovery**: Handles errors gracefully with logging
+#### Alarm dispatch
+- `scheduleTransition` reevaluates `checkCurrentScheduleState()` at the alarm's actual delivery time.
+- `regularWork` establishes the next recovery alarm before starting work.
+- Saved schedule changes rebuild alarms; future regular-work times are preserved across worker restarts.
 
 ### 5. **Enhanced Background Work Integration**
 
@@ -83,14 +86,20 @@ Implemented a robust, persistent scheduling and wake-up system for the Microsoft
 Extension Start → recoverFromServiceWorkerRestart() → 
 initialize() → initializeScheduleSystem() → 
 checkCurrentScheduleState() → [pause/resume as needed] → 
-scheduleNextStateChange() → [wait for timer] → 
-handleScheduledWakeUp() → [repeat cycle]
+scheduleNextStateChange() → [Chrome alarm] →
+checkCurrentScheduleState() → [repeat cycle]
 ```
 
 ### Timer Hierarchy
-1. **Schedule Wake-Up Timer** (highest priority): Handles pause/resume times
-2. **Regular Work Timer** (normal priority): Handles search intervals when active
-3. **Connectivity Timer** (fallback): Handles offline recovery
+1. **Schedule Transition Alarm**: Handles pause/resume times
+2. **Regular Work Alarm**: Handles search intervals and recovery when active
+3. **Midnight/Morning Alarms**: Reset local-day state and restart next-day work
+4. **Daily Tasks Alarm**: Handles task delay and retry
+
+Alarms survive service-worker suspension, not a closed browser. Delivery can be
+delayed by browser shutdown or device sleep; handlers reevaluate the current
+schedule when they run. In-flight requests can be interrupted and are retried
+on subsequent work rather than assumed successful.
 
 ### Storage Schema
 ```javascript

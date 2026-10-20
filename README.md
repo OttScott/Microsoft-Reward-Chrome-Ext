@@ -1,10 +1,8 @@
-I have stopped developing this extension. Likely, this is no longer working.
-
 # Microsoft Rewards Bot
 
 A Chrome extension for Microsoft Rewards, which automatically clears PC, mobile and Edge search quests and displays daily point countdown.
 
-This extension will not clear any promotional link or quiz quests and this feature will not be implemented.
+Daily Tasks can attempt supported quiz, poll, and visit-link promotions when enabled in Options. Completion depends on Microsoft Rewards; unsupported activities and failed attempts remain pending for retry.
 
 **This is a bot!**
 
@@ -18,6 +16,25 @@ Use at your own risk. I do not take responsibility for any consequence caused by
 4. Go to chrome://extensions/ and enable `Developer mode`.
 5. Select `Load unpacked` and select the `src` folder.
 6. Enable the extension.
+
+## Updating a local installation (2.28.2.0)
+
+There is no build step: the browser runs the JavaScript in `src` directly.
+For this checkout, the unpacked folder is
+`F:\src\Repos\Microsoft-Reward-Chrome-Ext\src`.
+
+1. Open `edge://extensions` (or `chrome://extensions`).
+2. Click **Reload** on the existing Microsoft Rewards Bot extension. Do not remove it; reloading retains settings.
+3. Reopen the popup and confirm version **2.28.2.0** on the extensions page.
+4. In Options, verify the schedule and enable **Daily Tasks** if desired.
+
+The browser must be running for scheduled work. Alarms recover work after service-worker restarts, but cannot wake a closed browser or guarantee that Microsoft credits searches.
+
+The local regression suite uses mocked browser APIs and does not perform live searches:
+
+```powershell
+node --test tests\extension.test.js
+```
 
 
 # Install from Chrome web store
@@ -35,7 +52,11 @@ Unfortunately, the extension could not make its way to become visible on web sto
 
 ### Background Work
 
-The extension checks your daily Microsoft Rewards progress every two hours and clears any incomplete search quests. When you have any available quiz/link quests yet to complete, a yellow badge will show with a number indicating the amount of points they worth.
+The extension checks authenticated Microsoft Rewards counters and attempts incomplete searches at the configured interval, within the configured schedule. **Start Searches Now** overrides that schedule for the requested run. Regular work, schedule transitions, midnight resets, and delayed Daily Tasks use Chrome alarms rather than long-running JavaScript timers.
+
+Search attempts and earned points are tracked separately: HTTP success does not mean Microsoft awarded credit. Sessions are bounded and leave uncredited searches pending for later work. Sign-in failures or unrecognized Rewards responses are reported instead of showing simulated points.
+
+If optional activity counters use an unsupported format, search counters can still be used. The popup warns that activity totals are unavailable and displays unknown totals as `--`, not zero. Invalid search counters and sign-in failures still stop searches explicitly.
 
 ### Action Button
 
