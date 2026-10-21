@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Microsoft Rewards Bot",
-  "version": "2.28.2.0",
+  "version": "2.28.3.0",
   "icons": {
     "16": "img/bingRwLogo@1x.png",
     "24": "img/bingRwLogo@1.5x.png",
@@ -36,7 +36,8 @@
 
   "host_permissions": [
     "https://*.bing.com/*",
-    "https://*.microsoft.com/*"
+    "https://*.microsoft.com/*",
+    "https://trends.google.com/*"
   ],
 
   "declarative_net_request": {

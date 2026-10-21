@@ -10,8 +10,9 @@ class GoogleTrend {
         this._nextTerm = null;
         this._totalTermCount = 0;
         this._fileMetadata = null; // Cache file stats to avoid unnecessary reads
-        this._corsBlocked = null; // Track if Google Trends is blocked by CORS
-        this._lastCorsCheck = null; // Track when we last checked CORS
+        this._backupTerms = null;
+        this._termSource = null;
+        this._updateTermsPromise = null;
         
         // Cached terms for PC and mobile search types
         this._cachedNextPC = null;
@@ -22,19 +23,15 @@ class GoogleTrend {
         this._pcWordPointer_ = -1;
         this._mbWordPointer_ = -1;
         
-        this._loadCorsStatus();
-        
         // Initialize with a small batch
-        this._initializeTermPool().catch(err => {
-            console.error('Failed to initialize term pool:', err);
-        });
+        this._initializationPromise = this._initializeTermPool();
     }
 
     // Fast initialization - load only what we need
     async _initializeTermPool() {
         try {
-            // Get file metadata first (size, line count estimate)
             await this._getFileMetadata();
+            this._termSource = 'archive';
             
             // Load just a small working set initially
             await this._loadTermBatch(50);
@@ -44,34 +41,38 @@ class GoogleTrend {
             console.error('Failed to initialize term pool:', error);
             // Fallback to minimal hard-coded terms
             this._workingPool = ['search', 'news', 'weather', 'sports', 'technology'];
+            this._termCache = [...this._workingPool];
+            this._termSource = 'emergency';
             this._totalTermCount = 5;
         }
     }
 
-    // Get file metadata without reading content
+    // Keep the packaged archive separate from the active term source.
     async _getFileMetadata() {
         if (this._fileMetadata) return this._fileMetadata;
         
         try {
-            // Estimate total terms by reading just the beginning of the file
             const response = await fetch(chrome.runtime.getURL('data/backup-searches.txt'));
+            if (!response.ok) throw new Error(`Archived search terms returned HTTP ${response.status}.`);
             const text = await response.text();
-            const lines = text.split('\n').filter(line => line.trim());
+            const lines = [...new Set(text.split('\n').map((line) => line.trim()).filter(Boolean))];
+            if (!lines.length) throw new Error('The archived search term list is empty.');
             
             this._fileMetadata = {
                 totalLines: lines.length,
                 lastModified: Date.now()
             };
-            this._totalTermCount = lines.length;
-            
-            // Cache the first batch for immediate use
-            this._termCache = lines;
+            this._backupTerms = lines;
+            if (!this._termCache) {
+                this._termCache = lines;
+                this._totalTermCount = lines.length;
+            }
             
             console.log(`📊 Backup search terms file: ${this._totalTermCount} terms available`);
             return this._fileMetadata;
         } catch (error) {
             console.error('Failed to get file metadata:', error);
-            return { totalLines: 0, lastModified: 0 };
+            throw error;
         }
     }
 
@@ -107,6 +108,9 @@ class GoogleTrend {
             // Always shuffle the final working pool
             this._shuffleArray(this._workingPool);
             this._poolIndex = 0;
+            this._nextTerm = null;
+            this._cachedNextPC = null;
+            this._cachedNextMobile = null;
             
             console.log(`⚡ Loaded ${this._workingPool.length} terms into working pool`);
             console.log('New batch preview:', this._workingPool.slice(0, 3));
@@ -139,23 +143,17 @@ class GoogleTrend {
     // Add method for skipping terms (compatibility with search skip functionality)
     async skipCurrentTerm() {
         console.log('🔄 Skipping current term, forcing new term selection');
+        await this._initializationPromise;
         
         // Clear all cached terms to force refresh
         this._cachedNextPC = null;
         this._cachedNextMobile = null;
         this._nextTerm = null;
         
-        // Force immediate reload of working pool to get different terms
-        if (this._workingPool && this._workingPool.length > 10) {
-            // Shuffle current pool to change order
-            this._shuffleArray(this._workingPool);
-            this._poolIndex = Math.min(this._poolIndex + 3, this._workingPool.length - 1); // Skip ahead
-            console.log(`⏭️ Skipped ahead in pool to index ${this._poolIndex}`);
-        } else {
-            // Reload with fresh batch
-            await this._loadTermBatch(50);
-            console.log('🔄 Loaded fresh batch for skip');
-        }
+        if (this._poolIndex >= this._workingPool.length) await this._loadTermBatch(50);
+        this._usedTermsHistory.add(this._workingPool[this._poolIndex]);
+        this._poolIndex++;
+        if (this._poolIndex >= this._workingPool.length) await this._loadTermBatch(50);
         
         // Pre-cache new terms for immediate UI update
         await this.getNextTermForDisplayAsync('PC');
@@ -171,13 +169,6 @@ class GoogleTrend {
     }
 
     _getNextTerm(searchType) {
-        // Return cached term if available
-        if (this._nextTerm) {
-            const term = this._nextTerm;
-            this._nextTerm = null;
-            return term;
-        }
-
         // Check if we need to refill the working pool
         if (this._poolIndex >= this._workingPool.length) {
             // Async refill (don't block current operation)
@@ -212,26 +203,13 @@ class GoogleTrend {
 
     // Cache the next term for UI display
     _cacheNextTerm() {
-        if (this._poolIndex < this._workingPool.length) {
-            this._nextTerm = this._workingPool[this._poolIndex];
-            const remaining = this._workingPool.length - this._poolIndex;
-            console.log(`🔮 Cached next term: "${this._nextTerm}" for future display (${remaining} unused terms remaining)`);
-        } else {
-            // Load next batch and cache first term
-            this._loadTermBatch(50).then(() => {
-                if (this._workingPool.length > 0) {
-                    this._nextTerm = this._workingPool[0];
-                    console.log(`🔮 Cached next term from new batch: "${this._nextTerm}"`);
-                }
-            }).catch(err => {
-                console.warn('Failed to cache next term from new batch:', err);
-            });
-        }
+        this._nextTerm = this._workingPool[this._poolIndex] || null;
     }
 
     // Add a method to get next term for display with search type support (async version)
     async getNextTermForDisplayAsync(searchType = 'PC') {
         try {
+            await this._initializationPromise;
             if (!this._termCache || this._termCache.length === 0) {
                 await this._loadTermBatch();
             }
@@ -262,7 +240,6 @@ class GoogleTrend {
         
         if (this._workingPool && this._poolIndex < this._workingPool.length) {
             const term = this._workingPool[this._poolIndex];
-            this._poolIndex++;
             return term;
         }
         
@@ -276,9 +253,8 @@ class GoogleTrend {
             return this._cachedNextPC.trim();
         }
         
-        // Try to get the NEXT term from the working pool (look ahead by 1)
-        if (this._workingPool && (this._poolIndex + 1) < this._workingPool.length) {
-            const term = this._workingPool[this._poolIndex + 1];
+        if (this._workingPool && this._poolIndex < this._workingPool.length) {
+            const term = this._workingPool[this._poolIndex];
             if (term && typeof term === 'string') {
                 return term.trim();
             }
@@ -301,6 +277,8 @@ class GoogleTrend {
         this._usedTermsHistory.clear();
         this._lastUsedTerms = [];
         this._nextTerm = null;
+        this._cachedNextPC = null;
+        this._cachedNextMobile = null;
         
         // Reset pool index and reshuffle for variety
         this._poolIndex = 0;
@@ -323,39 +301,22 @@ class GoogleTrend {
         });
     }
 
-    // Keep existing CORS and Google Trends methods but optimize them
     async updateTerms() {
-        const maxRetries = 3;
-        let attempt = 0;
+        if (!this._updateTermsPromise) {
+            this._updateTermsPromise = this._updateTerms().finally(() => {
+                this._updateTermsPromise = null;
+            });
+        }
+        return this._updateTermsPromise;
+    }
 
-        while (attempt < maxRetries) {
-            try {
-                // Check if we should skip Google Trends
-                if (await this._shouldSkipGoogleTrends()) {
-                    console.log('🚀 Using backup terms directly (Google Trends CORS blocked previously)');
-                    await this._ensureWorkingPoolFilled();
-                    return;
-                }
-
-                console.log(`� Attempting to fetch Google Trends (attempt ${attempt + 1}/${maxRetries})`);
-                await this._fetchGoogleTrend();
-                return; // Success
-                
-            } catch (error) {
-                attempt++;
-                
-                if (this._isCorsError(error)) {
-                    console.log('� Google Trends blocked by CORS policy - saving status and using backup terms');
-                    await this._saveCorsStatus(true);
-                    await this._ensureWorkingPoolFilled();
-                    return;
-                }
-                
-                if (attempt === maxRetries) {
-                    console.warn(`⚠️ All ${maxRetries} Google Trends attempts failed, using backup terms:`, error.message);
-                    await this._ensureWorkingPoolFilled();
-                }
-            }
+    async _updateTerms() {
+        await this._initializationPromise;
+        try {
+            await this._fetchGoogleTrend();
+        } catch (error) {
+            console.warn('Live Google Trends RSS unavailable; falling back to archived search terms:', error.message);
+            await this._useFallbackTerms(error.message);
         }
     }
 
@@ -366,92 +327,73 @@ class GoogleTrend {
         }
     }
 
-    // Optimized Google Trends fetching (unchanged but cleaner)
     async _fetchGoogleTrend() {
-        console.log('📡 Testing Google Trends accessibility...');
-        
-        const response = await fetch(`https://trends.google.com/trends/api/dailytrends?hl=en-US&tz=-420&geo=US&ns=15&ed=${this._getDateStr()}`);
-        
-        if (!response.ok) {
-            throw new Error(`Google Trends API returned ${response.status}: ${response.statusText}`);
-        }
-
-        const text = await response.text();
-        const jsonStr = text.replace(')]}\'', '');
-        const data = JSON.parse(jsonStr);
-
-        if (data?.default?.trendingSearchesDays?.[0]?.trendingSearches) {
-            const trends = data.default.trendingSearchesDays[0].trendingSearches;
-            const terms = trends.map(trend => trend.title?.query || '').filter(Boolean);
-            
-            if (terms.length > 0) {
-                console.log('✅ Google Trends successfully fetched:', terms.length, 'terms');
-                // Replace working pool with fresh Google Trends
-                this._workingPool = terms;
-                this._poolIndex = 0;
-                this._shuffleArray(this._workingPool);
-                await this._saveCorsStatus(false); // Mark as working
-                return;
-            }
-        }
-        
-        throw new Error('No valid trends data received');
-    }
-
-    // Keep existing helper methods but optimize them
-    _getDateStr() {
-        const date = new Date();
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}${month}${day}`;
-    }
-
-    _isCorsError(error) {
-        return error.message.includes('CORS') || 
-               error.message.includes('Access-Control-Allow-Origin') ||
-               (error.name === 'TypeError' && error.message.includes('Failed to fetch'));
-    }
-
-    // CORS status management (keep existing but make async safe)
-    async _loadCorsStatus() {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
         try {
-            const data = await chrome.storage.local.get(['googleTrendsCorsBlocked', 'lastCorsCheck']);
-            this._corsBlocked = data.googleTrendsCorsBlocked || false;
-            this._lastCorsCheck = data.lastCorsCheck ? new Date(data.lastCorsCheck) : null;
-        } catch (error) {
-            console.warn('Failed to load CORS status:', error);
-            this._corsBlocked = false;
-            this._lastCorsCheck = null;
-        }
-    }
-
-    async _saveCorsStatus(blocked) {
-        try {
-            await chrome.storage.local.set({
-                googleTrendsCorsBlocked: blocked,
-                lastCorsCheck: new Date().toISOString()
+            const response = await fetch('https://trends.google.com/trending/rss?geo=US', {
+                credentials: 'omit',
+                cache: 'no-store',
+                signal: controller.signal,
             });
-            this._corsBlocked = blocked;
-            this._lastCorsCheck = new Date();
-        } catch (error) {
-            console.warn('Failed to save CORS status:', error);
+            if (!response.ok) {
+                throw new Error(`Google Trends RSS returned HTTP ${response.status}.`);
+            }
+            const terms = GoogleTrend._getWordsFromRSS(await response.text());
+            this._termCache = terms;
+            this._termSource = 'live';
+            this._totalTermCount = terms.length;
+            this._usedTermsHistory.clear();
+            await this._loadTermBatch(50);
+            await this._saveTermStatus();
+            console.log(`[GoogleTrends] Using ${terms.length} live US trending searches from Google's RSS feed.`);
+        } finally {
+            clearTimeout(timeout);
         }
     }
 
-    async _shouldSkipGoogleTrends() {
-        if (!this._corsBlocked) return false;
-        
-        // Retry once per day
-        if (this._lastCorsCheck) {
-            const hoursSinceCheck = (Date.now() - this._lastCorsCheck.getTime()) / (1000 * 60 * 60);
-            if (hoursSinceCheck < 24) {
-                return true; // Skip, too recent
-            }
+    static _getWordsFromRSS(text) {
+        if (!/<rss(?:\s|>)/i.test(text) || !/<channel(?:\s|>)/i.test(text)) {
+            throw new Error('Google Trends did not return an RSS feed.');
         }
-        
-        console.log('📅 24+ hours since last CORS check - will retry Google Trends');
-        return false;
+        const terms = [];
+        const entities = {amp: '&', lt: '<', gt: '>', quot: '"', apos: '\''};
+        // MV3 workers have no DOMParser; only read titles within RSS items.
+        for (const item of text.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item\s*>/gi)) {
+            const title = /<title(?:\s[^>]*)?>([\s\S]*?)<\/title\s*>/i.exec(item[1]);
+            if (!title) continue;
+            const term = title[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>|&([^;]+);/g, (match, cdata, entity) => {
+                if (cdata !== undefined) return cdata;
+                if (Object.hasOwn(entities, entity)) return entities[entity];
+                if (/^#(?:[0-9]+|x[0-9a-f]+)$/i.test(entity)) {
+                    const hex = entity[1].toLowerCase() === 'x';
+                    const point = parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
+                    if (point > 0 && point <= 0x10ffff && (point < 0xd800 || point > 0xdfff)) {
+                        return String.fromCodePoint(point);
+                    }
+                }
+                throw new Error('Google Trends RSS contains an unsupported XML entity.');
+            }).replace(/\s+/g, ' ').trim();
+            if (term) terms.push(term);
+        }
+        if (!terms.length) throw new Error('Google Trends RSS contains no search terms.');
+        return [...new Set(terms)];
+    }
+
+    async _saveTermStatus(error = null) {
+        try {
+            const status = {
+                googleTrendsSource: this._termSource,
+                googleTrendsTermCount: this._totalTermCount,
+                googleTrendsLastAttempt: new Date().toISOString(),
+                googleTrendsLastError: error,
+            };
+            if (this._termSource === 'live') status.googleTrendsLastFetch = new Date().toISOString();
+            await chrome.storage.local.set(status);
+            await chrome.storage.local.remove(['googleTrendsCorsBlocked', 'lastCorsCheck']);
+        } catch (error) {
+            console.warn('Failed to save Google Trends source diagnostics:', error);
+        }
     }
 
     // Legacy compatibility methods (simplified)
@@ -478,9 +420,20 @@ class GoogleTrend {
         this._ensureWorkingPoolFilled();
     }
 
-    async _useFallbackTerms() {
-        // Compatibility shim  
-        await this._ensureWorkingPoolFilled();
+    async _useFallbackTerms(error = null) {
+        try {
+            await this._getFileMetadata();
+            this._termCache = this._backupTerms;
+            this._termSource = 'archive';
+        } catch (archiveError) {
+            console.error('Archived terms also unavailable; using emergency search terms:', archiveError);
+            this._termCache = ['search', 'news', 'weather', 'sports', 'technology'];
+            this._termSource = 'emergency';
+        }
+        this._totalTermCount = this._termCache.length;
+        this._usedTermsHistory.clear();
+        await this._loadTermBatch(50);
+        await this._saveTermStatus(error);
     }
 
     async _loadBackupSearchTerms() {
@@ -507,75 +460,6 @@ class GoogleTrend {
 
     _getDefaultFallbackTerms() {
         return this._getRandomBackupTerms(20);
-    }
-
-    async _processResponse(response) {
-        try {
-            const text = await response.text();
-            if (!text || text.length < 6) {
-                throw new Error('Empty response');
-            }
-
-            const jsonText = text.replace(/^\)\]\}'/, '');
-            const json = JSON.parse(jsonText);
-            
-            if (!json?.default?.trendingSearchesDays?.[0]?.trendingSearches) {
-                throw new Error('Invalid JSON structure');
-            }
-            
-            this._getWordsFromJSON(json);
-        } catch (error) {
-            console.error('Error processing response:', error);
-            throw error;
-        }
-    }
-
-    _getPastThreeDays() {
-        const dates = [];
-        const date = new Date();
-        for (let i = 0; i < 3; i++) {
-            if (i != 0) {
-                date.setDate(date.getDate() - 1);
-            }
-            dates.push(this._getyyyymmdd(date));
-        }
-        return dates;
-    }
-
-    _getyyyymmdd(date) {
-        return date.toJSON().slice(0, 10).replace(/-/g, '');
-    }
-
-    _getGoogleTrendUrl(yyyymmdd) {
-        return `https://trends.google.com/trends/api/dailytrends?hl=en-US&tz=-420&geo=US&ns=15&ed=${yyyymmdd}`;
-    }
-
-    _getWordsFromJSON(json) {
-        try {
-            const trends = json['default']['trendingSearchesDays'][0]['trendingSearches'];
-            const words = [];
-            
-            for (let i = 0; i < trends.length; i++) {
-                words.push(trends[i]['title']['query']);
-
-                const relatedQueries = trends[i]['relatedQueries'];
-                for (let j = 0; j < relatedQueries.length; j++) {
-                    words.push(relatedQueries[j]['query']);
-                }
-            }
-            
-            // Replace working pool with Google Trends data
-            this._workingPool = words;
-            this._poolIndex = 0;
-            this._shuffleArray(this._workingPool);
-            
-            // Legacy compatibility
-            this._googleTrendWords_.words = words;
-            this._googleTrendWords_.date = this._getyyyymmdd(new Date());
-        } catch (error) {
-            console.error('Error parsing JSON data:', error);
-            throw error;
-        }
     }
 
     _appendWord(word) {

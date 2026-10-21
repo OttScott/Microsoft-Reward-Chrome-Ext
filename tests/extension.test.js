@@ -975,3 +975,21 @@ test('popup clears stale totals when rewards data fails', () => {
     assert.equal(h.run(`document.getElementById('today-earnings').textContent`), '--');
     assert.equal(h.run(`document.getElementById('remaining-points').textContent`), '--');
 });
+
+test('popup renders live search terms as text rather than HTML', () => {
+    const h = createPopupHarness();
+    h.run(`const status = document.createElement('div');
+        status.id = 'search-status';
+        document.body.appendChild(status);
+        updateSearchStatusImmediate({
+            inProgress: true, type: 'PC', current: 1, total: 30,
+            timeRemaining: 1000, percentComplete: 0, searchInterval: 30000,
+            searchTerm: '<img src=x onerror=alert(1)>',
+            nextSearchTerm: '<script>unexpected</script>'
+        });`);
+    const html = h.run(`document.getElementById('search-status').innerHTML`);
+    assert(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
+    assert(html.includes('&lt;script&gt;unexpected&lt;/script&gt;'));
+    assert(!html.includes('<img'));
+    assert(!html.includes('<script>'));
+});

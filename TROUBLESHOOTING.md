@@ -2,11 +2,11 @@
 # Troubleshooting
 There are several reasons why you see an unhappy red error icon. Here are some possible solutions.
 
-## After updating to 2.28.2.0
+## After updating to 2.28.3.0
 
 Reload the existing unpacked extension at `edge://extensions` or
 `chrome://extensions`; no build or reinstall is needed. Reopen the popup after
-reloading. Confirm the displayed extension version is **2.28.2.0** and that it
+reloading. Confirm the displayed extension version is **2.28.3.0** and that it
 loads this repository's `src` folder.
 
 - **Manual start:** The popup displays startup progress or an error with a retry button. Sign in to Bing and Rewards if requested. A manual start overrides scheduled hours.
@@ -29,6 +29,18 @@ Warnings in the service-worker console identify the counter group, entry index,
 and field types without logging full account data. Invalid PC/mobile search
 counters still stop searches because their remaining work cannot be determined
 reliably.
+
+### Searches keep using the archived term list
+
+Version 2.28.3.0 replaces Google's retired JSON endpoint with the current public
+US RSS feed and adds the missing Google Trends host permission. Reload the
+extension and approve access to `trends.google.com` if prompted.
+
+At the next search run, look for `[GoogleTrends] Using ... live US trending
+searches` in the service-worker console. A failed request logs its reason and
+selects archived terms explicitly; it is retried on the next run, not suppressed
+for 24 hours. Live terms are reused when their pool is exhausted instead of
+silently replacing them with the archive.
 
 ## General steps
 

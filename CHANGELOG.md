@@ -1,5 +1,18 @@
 # Changelog
 
+## Version 2.28.3.0
+
+- Restored live Google search trends using Google's public US RSS feed instead of the retired `dailytrends` JSON endpoint.
+- Added the required `https://trends.google.com/*` host permission. RSS parsing works directly in the Manifest V3 service worker without DOM APIs or a build step.
+- Kept live terms active through pool refills and resets. Popup previews no longer consume terms or cause duplicate searches.
+- Removed the old 24-hour CORS lockout. Failed live requests time out after 15 seconds, explicitly fall back to the archive, and retry live on the next search run.
+- Added source/failure diagnostics and escaped live search titles when rendering the popup.
+
+**Updating:** Reload the unpacked extension at `edge://extensions`, approve
+Google Trends access if prompted, and reopen the popup.
+
+---
+
 ## Version 2.28.2.0
 
 - Fixed a 2.28.1.0 regression where an unsupported `ActivityAndQuiz` or Daily Set point counter blocked valid search counters and caused Retry searches to fail repeatedly.

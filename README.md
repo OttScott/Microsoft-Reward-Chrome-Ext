@@ -17,7 +17,7 @@ Use at your own risk. I do not take responsibility for any consequence caused by
 5. Select `Load unpacked` and select the `src` folder.
 6. Enable the extension.
 
-## Updating a local installation (2.28.2.0)
+## Updating a local installation (2.28.3.0)
 
 There is no build step: the browser runs the JavaScript in `src` directly.
 For this checkout, the unpacked folder is
@@ -25,7 +25,7 @@ For this checkout, the unpacked folder is
 
 1. Open `edge://extensions` (or `chrome://extensions`).
 2. Click **Reload** on the existing Microsoft Rewards Bot extension. Do not remove it; reloading retains settings.
-3. Reopen the popup and confirm version **2.28.2.0** on the extensions page.
+3. Approve access to `trends.google.com` if prompted, reopen the popup, and confirm version **2.28.3.0** on the extensions page.
 4. In Options, verify the schedule and enable **Daily Tasks** if desired.
 
 The browser must be running for scheduled work. Alarms recover work after service-worker restarts, but cannot wake a closed browser or guarantee that Microsoft credits searches.
@@ -33,7 +33,7 @@ The browser must be running for scheduled work. Alarms recover work after servic
 The local regression suite uses mocked browser APIs and does not perform live searches:
 
 ```powershell
-node --test tests\extension.test.js
+node --test tests\extension.test.js tests\googleTrend.test.js
 ```
 
 
@@ -57,6 +57,19 @@ The extension checks authenticated Microsoft Rewards counters and attempts incom
 Search attempts and earned points are tracked separately: HTTP success does not mean Microsoft awarded credit. Sessions are bounded and leave uncredited searches pending for later work. Sign-in failures or unrecognized Rewards responses are reported instead of showing simulated points.
 
 If optional activity counters use an unsupported format, search counters can still be used. The popup warns that activity totals are unavailable and displays unknown totals as `--`, not zero. Invalid search counters and sign-in failures still stop searches explicitly.
+
+### Live search terms
+
+Each search run fetches Google's public [US trending-search RSS feed](https://trends.google.com/trending/rss?geo=US).
+These are currently trending queries, not an all-time popularity ranking. Live
+terms stay active through pool refills and resets; previews do not consume them.
+
+If the live feed fails or takes longer than 15 seconds, the extension logs the
+reason and uses the packaged archive. It retries the live feed on the next run,
+without the old 24-hour CORS lockout. The service-worker console reports the live
+term count or fallback reason. Source diagnostics are also saved in local
+storage as `googleTrendsSource` (`live`, `archive`, or `emergency`),
+`googleTrendsLastFetch`, `googleTrendsTermCount`, and `googleTrendsLastError`.
 
 ### Action Button
 

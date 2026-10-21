@@ -408,13 +408,13 @@ function updateSearchStatusImmediate(response) {
                     
                     ${response.searchTerm ? `
                         <div class="search-term-container">
-                            Current: "${response.searchTerm}"
+                            Current: "${escapeHtml(response.searchTerm)}"
                         </div>
                     ` : ''}
                     
                     ${response.nextSearchTerm ? `
                         <div class="next-search-container">
-                            <div class="next-search-term">Next: "${response.nextSearchTerm}"</div>
+                            <div class="next-search-term">Next: "${escapeHtml(response.nextSearchTerm)}"</div>
                             <div class="search-buttons">
                                 <button id="skip-search-button" class="skip-button">Skip</button>
                                 <button id="force-search-button" class="force-button">Next</button>
